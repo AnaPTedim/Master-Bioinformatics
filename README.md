@@ -1,2 +1,2 @@
 # Master-Bioinformatics
-This reposiitory intends to represent what I have learned during my Master on Bioinformatics
+This repository intends to represent what I have learned during my Master's in Bioinformatics
