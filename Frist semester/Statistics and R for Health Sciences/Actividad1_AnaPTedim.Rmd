@@ -1,0 +1,194 @@
+---
+title: "Actividad 1 de Estadística y R para Ciencias de la Salud"
+author: "Ana Sofia Santos Tedim Sousa Pedrosa"
+date: "2025-11-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+    echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width=8, 
+  fig.height=15
+)
+
+library(tidyverse)
+library(pheatmap)
+library(ComplexHeatmap)
+library(patchwork)
+library(ggpubr)
+
+```
+
+## Representación gráfica de datos e interpretación de resultados
+
+```{r}
+Data <- read_csv("MUBioinfo_dataset_genes_oct2025.csv", col_names = TRUE) 
+head(Data, 3)
+```
+
+#### Pregunta 1 - Ten en cuenta los siguientes genes: "AQ_ESR1", "AQ_HER2", "AQ_BRCA1", "AQ_BRCA2", "AQ_MKI67", "AQ_GATA3", "AQ_FOXA1", "AQ_CCND1", "AQ_CDH1", "AQ_TP53":
+
+```{r}
+Data_P1 <- Data %>% select(tratamiento, AQ_esr1, AQ_her2, AQ_brca1, AQ_brca2, AQ_mki67, AQ_gata3, AQ_foxa1, AQ_ccnd1, AQ_cdh1, AQ_tp53) %>%
+pivot_longer(
+    cols = starts_with("AQ_"),
+    names_to = "Gen",
+    values_to = "Expresion_AQ"
+  )
+
+nombres_cursiva <- c(
+  AQ_esr1  = "bold(italic(ESR1))",
+  AQ_her2  = "bold(italic(HER2))",
+  AQ_brca1 = "bold(italic(BRCA1))",
+  AQ_brca2 = "bold(italic(BRCA2))",
+  AQ_mki67 = "bold(italic(MKI67))",
+  AQ_gata3 = "bold(italic(GATA3))",
+  AQ_foxa1 = "bold(italic(FOXA1))",
+  AQ_ccnd1 = "bold(italic(CCND1))",
+  AQ_cdh1  = "bold(italic(CDH1))",
+  AQ_tp53  = "bold(italic(TP53))"
+)
+
+Data_P1 <- Data_P1 %>% mutate(Gen_label = recode(Gen, !!!nombres_cursiva))
+
+ggplot(Data_P1, aes(x=tratamiento, y=Expresion_AQ, fill = tratamiento)) + 
+  geom_boxplot(outlier.color = "#FF0000", outlier.size = 2, width = 0.7)+ 
+  geom_jitter(color = "black", width = 0.2) + 
+  stat_compare_means(label = "p.signif", method = "wilcox.test") +
+  facet_wrap(~ Gen_label, 
+             ncol = 2,
+             labeller = label_parsed) + 
+  theme_minimal() + 
+  scale_fill_manual(values = c("farmaco" = "#FF69B4", "placebo" = "#48D1CC")) + 
+  labs(title = "Distribución del genes", 
+       x = "Tipo de Tratamiento", 
+       y = "Expresión génica" ) +  
+  theme(plot.title = element_text(hjust = 0.5), 
+        legend.position = "bottom",
+        legend.title = element_blank(), 
+        strip.text = element_text(face = "bold"))
+```
+
+***- ¿Qué interpretación sacas de la distribución de la expresión de los genes cuando los comparamos por tipo de tratamiento? (mínimo 150 palabras de extensión).***
+
+Para evaluar si las diferencias observadas en los boxplots son estadísticamente significativas, se aplicó el test no paramétrico de Wilcoxon, adecuado para comparar dos grupos independientes cuando no se asume normalidad en los datos de expresión génica.
+
+Al analizar los boxplots de los diez genes incluidos, se observa un patrón claro y consistente: **para todos los genes, la expresión génica del grupo tratado con el fármaco se aproxima a 0, mientras que el grupo placebo presenta niveles cercanos a 1**. Esto indica que el tratamiento produce una reducción generalizada y significativa de la expresión génica, afectando a genes de funciones muy diversas.
+
+En los genes asociados a proliferación celular, como *MKI67* y *CCND1*, esta disminución puede reflejar una menor actividad proliferativa inducida por el fármaco. De igual forma, los genes luminales *ESR1*, *GATA3* y *FOXA1*, implicados en la señalización hormonal del cáncer de mama, muestran también una caída significativa, lo que sugiere una supresión global de la vía estrogénica. Los genes de reparación del ADN, *BRCA1* y *BRCA2*, junto con *TP53*, un regulador clave del daño genético, también presentan niveles bajo en el grupo tratado con el fármaco, lo que indica que el tratamiento podría inhibir vías de mantenimiento genómico. Incluso genes estructurales como *CDH1* o receptores como *HER2* siguen este mismo patrón.
+
+En conjunto, los resultados muestran que el fármaco no afecta únicamente a rutas específicas, sino que induce una represión transcriptómica global, reduciendo la expresión de todos los genes analizados de manera significativa y uniforme.
+
+#### Pregunta 2 - Ten en cuenta los siguientes parámetros bioquímicos para toda la población: "glucosa", "leucocitos", "linfocitos", "neutrofilos", "chol", "hdl", "hierro", "igA", "igE", "igG", "igN", "ldl", "pcr", "transferrina", "trigliceridos", "cpk":
+
+```{r}
+Data_P2 <- Data %>% select(glucosa, leucocitos, linfocitos, neutrofilos, chol, hdl, hierro, iga, ige, igg, ign, ldl, pcr, transferrina, trigliceridos, cpk) %>%
+pivot_longer(
+    cols = everything(),
+    names_to = "Parametro",
+    values_to = "Valor"
+  )
+
+nombres_titulos <- c(
+  glucosa  = "bold(Glucosa)",
+  leucocitos  = "bold(Leucocitos)",
+  linfocitos = "bold(linfocitos)",
+  neutrofilos = "bold(neutrofilos)",
+  chol = "bold(Colesterol)",
+  hdl = "bold(HDL)",
+  ldl = "bold(LDL)",
+  hierro = "bold(Hierro)",
+  iga = "bold(igA)",
+  ige = "bold(igE)",
+  igg = "bold(igG)",
+  ign = "bold(igM)",
+  pcr  = "bold(PCR)",
+  trigliceridos  = "bold(Trigliceridos)",
+  cpk  = "bold(CPK)",
+  transferrina  = "bold(Transferrina)"
+)
+
+Data_P2 <- Data_P2 %>% mutate(Parametro_label = recode(Parametro, !!!nombres_titulos))
+
+ggplot(Data_P2, aes(x = Valor)) + 
+  geom_histogram(aes(y = ..density..),
+                 bins = 30, 
+                 fill = "#8B008B"
+                 ) + 
+  facet_wrap(~Parametro_label, 
+             ncol = 2,
+             scales = "free",
+             labeller = label_parsed) + 
+  geom_density(color = "#708090", linewidth = 1) + 
+  theme_minimal() + 
+  labs(
+    title = "Distribución de parámetros bioquímicos",
+    y = "Frecuencia"
+  ) +
+  theme(plot.title = element_text(hjust = 0.5), 
+        strip.text = element_text(face = "bold"))
+
+```
+
+***- ¿Qué interpretación sacas de la distribución de los datos de las variables bioquímicas en toda la población?***
+
+Al observar los histogramas de los parámetros bioquímicos, se aprecia que ni todas las variables se comportan igual en la población. Variables clásicamente metabólicas como glucosa, colesterol total, trigliceridos y creatina-fosfocinasa (CPK) muestran distribuciones con mayor dispersión y presencia de valores altos, compatibles con pacientes con alteraciones metabólicas o daño muscular. En cambio, parámetros como hierro, transferrina, colesterol HDL y LDL tienden a concentrarse más alrededor de un rango central, aunque también presentan cierta variabilidad entre pacientes.
+
+En los marcadores inflamatorios e inmunológicos, como PCR, leucocitos, neutrofilos, linfocitos y las inmunoglobulinas igA, igG, igE e igM, se observan distribuciones donde la mayoría de los pacientes se sitúan en valores moderados, pero con algunos individuos que destacan por niveles muy elevados, lo que sugiere estados de inflamación o respuesta inmune más activa en un subgrupo de la cohorte. Este patrón encaja con el contexto oncológico y con la posible activación de vías relacionadas con genes inflamatorios como *IL6* o *TNF*, que podrían estar aumentados en pacientes con PCR o leucocitos más altos. En conjunto, los histogramas reflejan una población heterogénea, con perfiles bioquímicos muy variados que podrían relacionarse con diferencias en la expresión de genes implicados en inflamación, metabolismo y estrés oxidativo.
+
+***- ¿Crees que sigue una distribución normal o simétrica en la que se visualiza una distribución parecida a una campana de Gauss?***
+
+Analizando la forma de los histogramas y las curvas de densidad, la mayoría de los parámetros bioquímicos no parecen seguir una distribución normal perfecta. En muchas variables, como glucosa, trigliceridos, PCR y CPK, se observa una clara asimetría hacia la derecha (cola larga de valores elevados), lo que indica la presencia de pacientes con niveles mucho más altos que la media. Algo similar puede ocurrir con leucocitos y neutrofilos, donde suelen existir algunos valores extremos asociados a inflamación o infección. Este tipo de patrón se aleja de la típica “campana de Gauss” simétrica.
+
+En otros marcadores, como el colesterol HDL, LDL, hierro o las inmunoglobulinas igA, igG e igM, la distribución puede ser algo más concentrada, pero aun así no es perfectamente simétrica: aparecen ligeras colas o picos que indican subgrupos de pacientes. Desde el punto de vista estadístico, esto sugiere que, igual que ocurre con los valores de expresión génica (por ejemplo en genes como *ESR1*, *MKI67* o *TP53*), los parámetros bioquímicos presentan heterogeneidad y desviaciones de la normalidad. Por tanto, para muchos análisis comparativos podría ser más adecuado utilizar pruebas no paramétricas o transformar los datos, en lugar de asumir una distribución normal estricta.
+
+#### Pregunta 3 - Mapea todos los valores de expresión de genes para poder visualizar posibles patrones entre los datos de los pacientes:
+
+```{r}
+set.seed(1995)
+Data$id_paciente <- paste0("PAC_", seq_len(nrow(Data)))
+Data_P3 <- Data %>% select(starts_with("AQ_"), id_paciente) %>% column_to_rownames("id_paciente")
+matrix_Data_P3 <- as.matrix(Data_P3)
+matrix_Data_P3_scaled <- scale(matrix_Data_P3)
+genes_mayus <- toupper(gsub("AQ_", "", colnames(matrix_Data_P3_scaled)))
+colnames(matrix_Data_P3_scaled) <- genes_mayus
+pheatmap(
+  matrix_Data_P3_scaled,
+  clustering_method = "complete",  
+  clustering_distance_rows = "euclidean",
+  clustering_distance_cols = "euclidean",
+  cutree_rows = 8,
+  cutree_cols = 3,
+  show_rownames = TRUE,
+  show_colnames = TRUE,          
+  fontsize_row = 6,
+  main = "Heatmap de expresión de genes (escalados)",
+)
+
+```
+
+***-¿Hay grupos de genes con patrones de expresión similares o diferenciadas?***
+
+En el heatmap, las filas representan a los pacientes y el análisis de clustering permite identificar varios subgrupos con perfiles transcriptómicos distintos. Parece haber claramente 3 clusters de genes con 10 genes cada uno. 
+
+1. En que el cluster1 (*MMP9*, *CTLA4*, *MYC*, *CASP3*, *CDKN2A*, *PDCD1*, *HLAA*, *PTEN*, *KRAS*, *AKT1*) se asocia con genes de señalización, apoptosis e inmunoregulación que podria estar relaciones con la actividad tumoral y mecanismos de escape al sistema inmune. 
+2. El cluster2 (*FOXA1*, *HER*, *CHD1*, *ESR1*, *MKI67*, *CCND1*, *TP53*, *BRCA1*, *BRCA2*, *GATA3*) se asocia también con genes de señalización y control del ciclo celular podria decirse que estaria relaccionado con el comportamento tumoral, proliferación y características hormonales del cáncer de mama. 
+3. El cluster3 (*B2M*, *GAPDH*, *IL6*, *EGFR*, *CXCL8*, *RPL13A*, *HPRT1*, *VEGFA*, *ACTB*, *TNF*) que se asocia con genes del sistema inmune.
+
+***- ¿Hay algún tipo de patrón de pacientes que tiene la expresión de genes similar o diferenciada?***
+
+Los pacientes se diven en 8 grupos dependiendo del grado de activación de los 3 clusters mencionados anteriormente:
+
+1.  Los pacientes del grupo 1 muestran una expresión baja para todos los genes testados y por lo tanto de los 3 clusters.
+2.  Los pacientes del grupo 2 muestran una expresión baja para los genes del cluster 1 y 3 pero una expresión aumentada para los genes de los clusters 1 y 3.
+3.  Los pacientes del grupo 3 muestran una expresión baja para los genes del cluster 2 y 3 pero una expresión aumentada para los genes de los clusters 1.
+4.  Los pacientes del grupo 4 muestran una expresión baja para los genes del cluster 3 pero una expresión aumentada para los genes de los clusters 1 y 2.\
+5.  Los pacientes del grupo 5 muestran una expresión baja para los genes del cluster 1 pero una expresión aumentada para los genes de los clusters 2 y 3.
+6.  Los pacientes del grupo 6 muestran una expresión baja para los genes del cluster 1 y 2 pero una expresión aumentada para los genes de los clusters 3.
+7.  Los pacientes del grupo 7 muestran una expresión aumentada para los genes testados y por lo tanto de los 3 clusters.
+8.  Los pacientes del grupo 8 muestran una expresión baja para los genes del cluster 2 pero una expresión aumentada para los genes de los clusters 1 y 3.
+
+Los 8 grupos representan todas las combinaciones posibles entre alta/baja señalización tumoral, proliferación y actividad inflamatoria, generando perfiles que van desde tumores muy inactivos (G1) hasta tumores altamente inflamados, proliferativos y molecularmente activos (G7), con múltiples estados intermedios (G2–G8).

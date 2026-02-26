@@ -1,0 +1,288 @@
+---
+title: "Resolución Actividad 2 máster Bioinformática UNIR (2025)"
+author: "Ana Sofia Santos Tedim Sousa Pedrosa"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    theme: simplex
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+    echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width=8, 
+  fig.height=15
+)
+
+library(dplyr)
+library(gtsummary)
+library(nortest)
+library(tidyverse)
+library(stats)
+library(car)
+library(knitr)
+library(kableExtra)
+library(flextable)
+library(officer)
+
+options(scipen = 9) # para minimizar notación científica 
+
+set.seed(1234) #para garantizar la reporducibilidad
+```
+
+## Importar los datos
+
+```{r Data}
+##########################
+# 1. Carga de los datos  #
+##########################
+
+Data1 <- read_csv("MUBioinfo_dataset_genes_oct2025.csv", col_names = TRUE) 
+
+# Comprobación rápida
+cat("Número de filas:", nrow(Data1), " Número de columnas:", ncol(Data1), "\n")
+head(Data1, 5)
+
+```
+
+## Procesamiento de los datos
+
+```{r procesamiento de los datos}
+##################################
+# 2. Procesamiento de los datos  #
+##################################
+
+# Identificar las variables de genes
+genes <- grep("^AQ_", names(Data1), value = TRUE)
+
+# Convertir las variables categóricas principales a factor
+Data1 <- Data1 %>% 
+  mutate(
+    tratamiento = factor(tratamiento),
+    extension = factor(extension)
+  )
+
+Data1 <- Data1 %>% 
+  filter(tratamiento != "unknown", extension != "unknown", edad != "unknown")
+
+# Comprobación rápida despues del procesamiento de datos
+cat("Número de filas:", nrow(Data1), " Número de columnas:", ncol(Data1), "\n")
+str(Data1, list.len = 11)
+```
+## Pregunta 1:	Comprobar la normalidad de los genes y realizar una interpretación de los resultados obtenidos:
+ - Utilizar pruebas estadísticas de normalidad (recuerda que Shapiro-Wilk funciona cuando la N es pequeña, si no puedes usar otras como addtest). 
+ - Refleja los valores p del contraste de hipótesis en una tabla modelo 1 adjunta al final de documento en la sección «Extensión y formato».
+ 
+```{r Tabla modelo 1}
+###############################################
+# Pregunta 1: CREACIÓN DE LA TABLA MODELO 1   #
+# (Evaluación de la normalidad)               #
+###############################################
+
+# Contar el número de observaciones (N)
+N <- nrow(Data1) 
+
+# Función para aplicar el test de normalidad correcto
+test_normalidad <- function(x) {
+  x <- x[!is.na(x)] # Eliminar NAs
+  if (length(x) <= 50) {
+    # Shapiro-Wilk para N pequeña (N <= 50)
+    resultado <- shapiro.test(x)$p.value
+    test_name <- "Shapiro-Wilk"
+  } else {
+    # Anderson-Darling para N grande (N > 50)
+    resultado <- ad.test(x)$p.value
+    test_name <- "Anderson-Darling"
+  }
+  return(list(p_value = resultado, test = test_name))
+}
+
+# Aplicar el test a todas las variables de genes
+resultados_normalidad <- sapply(Data1 %>% select(all_of(genes)), test_normalidad)
+
+# Crear un vector booleano para identificar la normalidad (TRUE si es normal, p >= 0.05)
+es_normal <- unlist(resultados_normalidad["p_value", ]) >= 0.05
+
+# Código para la creación de la tabla modelo 1
+tabla_modelo1_df <- data.frame(
+  Variable = genes,
+  Test_utilizado = unlist(resultados_normalidad["test", ]),
+  Valor_p = unlist(resultados_normalidad["p_value", ]),
+  Interpretación = ifelse(es_normal, 
+                          "Compatible con distribución normal (p >= 0.05)", 
+                          "No compatible con distribución normal (p < 0.05)")
+)
+
+# Formatear el Valor_p a 3 decimales para la visualización final
+tabla_modelo1_df$Valor_p_formato <- style_pvalue(tabla_modelo1_df$Valor_p, digits = 3)
+
+## Para mostrar a tabla modelo 1 en el documento html
+# Seleccionar y renombrar las columnas que queremos mostrar
+tabla_modelo1_formato <- tabla_modelo1_df %>%
+  select(
+    Variable, 
+    Test_utilizado, 
+    Valor_p_formato, # Usamos la columna ya formateada a texto
+    Interpretación
+  ) %>%
+  rename(
+    `Test Utilizado` = Test_utilizado,
+    `Valor p` = Valor_p_formato
+  )
+
+# Generar la tabla con kable y aplicar estilos con kableExtra
+tabla_modelo1_formato %>%
+  kable(
+    format = "html", 
+    align = c('l', 'c', 'c', 'l'), # Alineación de columnas: Izq, Centro, Centro, Izq
+    caption = "Tabla modelo 1. Determinación de normalidad de los datos de expresión génica"
+  ) %>%
+  # Aplicar un estilo limpio y moderno
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+    full_width = FALSE,
+    position = "center",
+    font_size = 10
+  ) 
+
+# Pasar la tabla modelo 1 a un csv para pasarla al word
+write.csv2(tabla_modelo1_df, "Tabla_modelo1.csv", sep = ";")
+
+# Definir la lista de estadísticas personalizadas para gtsummary
+stat_list <- lapply(setNames(es_normal, genes), function(is_normal){
+  if(is_normal) "{mean} ({sd})" # Media (DE)
+  else          "{median} ({p25} a {p75})" # Mediana (RIQ)
+})
+```
+ 
+
+**Análisis de la normalidad de la expresión génica**
+
+La Tabla Modelo 1 recoge los resultados del análisis de normalidad de la expresión de los genes analizados en la cohorte de estudio. Dado el tamaño muestral N > 50, la normalidad de las distribuciones se evaluó mediante el test de Anderson–Darling, con el objetivo de comprobar el cumplimiento de los supuestos necesarios para la aplicación de métodos estadísticos paramétricos.
+
+Los resultados obtenidos muestran que los genes analizados presentan valores de p < 0.01, inferiores al umbral convencional de significación (p < 0.05), lo que indica que las distribuciones de la expresión génica se desvían significativamente de la normalidad. Este comportamiento es característico de datos de expresión génica en contextos oncológicos, donde es habitual observar distribuciones asimétricas y una elevada variabilidad biológica, incluso en genes tradicionalmente considerados constitutivos.
+
+En consecuencia, para el cálculo y análisis de las estadísticas descriptivas presentadas en las Tablas Modelo 2 y 3 se emplearon la mediana y el rango intercuartílico (RIQ) como medidas de tendencia central y dispersión. Más aún, en coherencia con la distribución observada de los datos, se aplicaron pruebas no paramétricas para los contrastes de hipótesis: el test de Kruskal–Wallis para comparaciones entre dos o más grupos (Tabla Modelo 2) y el test de Wilcoxon–Mann–Whitney para comparaciones entre dos grupos independientes (Tabla Modelo 3). Esta aproximación metodológica asegura la adecuación del análisis estadístico a la naturaleza real de los datos y refuerza la validez de los resultados obtenidos.
+
+## Pregunta 2: Calcular y analizar estadísticas descriptivas de los valores sin transformar (media + desviación estándar si son paramétricas, mediana + rango intercuartílico (p25-p75) si no lo son) de las variables bioquímicas, síntomas, sociodemográficas y de los genes:
+
+### Pregunta 2.1: En función del tratamiento (1er nivel) y de la extensión tumoral (2º nivel), crea una tabla descriptiva (tabla modelo 2) únicamente con las variables de genes.
+```{r Tabla model 2}
+#######################################################
+# Pregunta 2.1: CREACIÓN DE LA TABLA MODELO 2         #
+# (Descriptivos por Tratamiento y Extensión Tumoral)  #
+#######################################################
+
+# Creación de la tabla estratificada
+tabla_modelo2 <- Data1 %>%
+  # Seleccionar las variables de estratificación y los genes
+  select(tratamiento, extension, all_of(genes)) %>%
+  # Estratificar por 'tratamiento' (1er nivel)
+  tbl_strata(
+    strata = tratamiento,
+    # Función a aplicar dentro de cada estrato (tratamiento)
+    .tbl_fun = ~ .x %>%
+      # Generar tabla descriptiva, comparando por 'extension' (2º nivel)
+      tbl_summary(
+        by = extension,
+        # Usar las estadísticas definidas según la normalidad
+        statistic = stat_list,
+        # Formato de decimales (1 decimal para las estadísticas)
+        digits = all_continuous() ~ 1,
+      ) %>%
+      # Añadir el Valor p para el contraste de hipótesis (entre 'extensiones')
+      add_p(
+        # Usar Kruskal-Wallis (no paramétrico) para comparación de grupos, ya que no hay normalidad para los genes que se están evaluando.
+        test = all_continuous() ~ "kruskal.test", 
+        # Formato del valor p a 3 decimales
+        pvalue_fun = ~ style_pvalue(.x, digits = 3)
+      ) 
+  )
+
+# Mostrar la tabla modelo 2
+tabla_modelo2
+
+## Guardar el objeto flextable directamente como un documento Word
+# Convertir la tabla gtsummary a un objeto flextable
+tabla_modelo2_ft <- tabla_modelo2 %>% 
+  gtsummary::as_flex_table()
+
+flextable::save_as_docx(
+  tabla_modelo2_ft, 
+  path = "Tabla_Modelo_2_Final.docx"
+)
+```
+**Expresión génica según tratamiento y extensión tumoral**
+
+La Tabla Modelo 2 muestra los estadísticos descriptivos (mediana y rango intercuartílico) de la expresión de los genes analizados, estratificados por tipo de tratamiento (fármaco vs placebo) y por extensión tumoral (localizado vs metastásico), así como los valores de *p* asociados al contraste de hipótesis mediante el test no paramétrico de Kruskal–Wallis.
+
+En el grupo tratado con fármaco, se observan diferencias estadísticamente significativas (p < 0.001) entre tumores localizados y metastásicos para la mayoría de los genes constitutivos e inflamatorios, como *ACTB*, *GAPDH*, *B2M*, *RPL13A*, *HPRT1*, *VEGFA*, *IL6*, *TNF*, *EGFR* y *CXCL8*. En todos los casos, la expresión génica es significativamente mayor en los tumores metastásicos, lo que sugiere una asociación entre la progresión tumoral y un incremento de la actividad transcripcional de genes relacionados con procesos básicos celulares, inflamación, angiogénesis y señalización proliferativa. Este patrón se refuerza al observar que estos mismos genes presentan también una mayor expresión en tumores metastásicos en el grupo placebo, indicando que las diferencias observadas están fundamentalmente asociadas a la extensión tumoral y no al tipo de tratamiento administrado.
+
+En el grupo placebo, el patrón es distint habiendo numerosos genes como *ESR1*, *HER2*, *BRCA1*, *BRCA2*, *MKI67*, *GATA3*, *FOXA1*, *CCND1*, *CDH1* y *TP53*, presentan diferencias estadisticamente significativas (p < 0.001), con valores de expresión consistentemente más altos en tumores metastásicos. Este hallazgo sugiere que, en ausencia de tratamiento farmacológico, la progresión tumoral se asocia con una activación más marcada de estas vías moleculares. En contraste, en el grupo tratado con el fármaco estas diferencias dejan de ser estadísticamente significativas, lo que indica que el tratamiento podría estar modulando la expresión de estos genes en tumores metastásicos, reduciendo su sobreexpresión y atenuando las diferencias asociadas al estadio tumoral.
+
+Finalmente, un tercer grupo de genes relacionados con señalización intracelular e inmunorregulación (*MMP9*, *PTEN*, *MYC*, *KRAS*, *AKT1*, *CDKN2A*, *PDCD1*, *CTLA4*, *HLAA*, *CASP3*) no muestra diferencias estadísticamente significativas en ninguno de los dos brazos del estudio, lo que indica que su expresión no parece depender ni del tratamiento a que estan submetidos los pacientes ni de la extensión tumoral de la cohorte usada en este estudio.
+
+En conjunto, estos resultados ponen de manifiesto un efecto diferencial del tratamiento farmacológico sobre la expresión de genes asociados a vías hormonales, ciclo celular y control genómico (*ESR1*, *HER2*, *BRCA1*, *BRCA2*, *MKI67*, *GATA3*, *FOXA1*, *CCND1*, *CDH1* y *TP53*), mientras que la expresión de genes constitutivos e inflamatorios parece estar principalmente asociada al grado de progresión tumoral (*ACTB*, *GAPDH*, *B2M*, *RPL13A*, *HPRT1*, *VEGFA*, *IL6*, *TNF*, *EGFR* y *CXCL8*). Asimismo, la variación observada en genes tradicionalmente considerados constitutivos (*ACTB*, *GAPDH*, *B2M*, *RPL13A* y *HPRT1*) sugiere que podrían reflejar cambios en la agresividad tumoral, independientemente del contexto terapéutico, lo que debe tenerse en cuenta tanto en la interpretación biológica como en su uso como genes de referencia de progresión tumoral.
+
+### Pregunta 2.2: En función de la edad en 2 categorías según la mediana (categoría 1: edad <percentil 50 de edad; categoría 2: edad >=percentil 50 de edad), crea una tabla descriptiva (tabla modelo 3) únicamente con las variables de genes.
+
+```{r Tabla modelo 3}
+################################################
+# Pregunta 2.2: CREACIÓN DE LA TABLA MODELO 3  #
+# (Descriptivos por Edad Categorizada)         #
+################################################
+
+#Calcular la mediana de la edad
+p50_edad <- median(Data1$edad, na.rm = TRUE)
+
+# Crear la nueva variable categórica 'edad_cat' (edad categorizada)
+Data1<- Data1 %>%
+  mutate(edad_cat = ifelse(edad < p50_edad, "< P50", "≥ P50") %>% factor())
+
+# Creación de la tabla descriptiva por edad categorizada
+tabla_modelo3 <- Data1 %>%
+  # Seleccionar la nueva variable categórica y los genes
+  select(edad_cat, all_of(genes)) %>%
+  tbl_summary(
+    by = edad_cat,
+    # Usar las estadísticas definidas según la normalidad
+    statistic = stat_list,
+    # Formato de decimales
+    digits = all_continuous() ~ 1
+  ) %>%
+  # Añadir el Valor p para el contraste de hipótesis (entre categorías de edad)
+  add_p(
+    # Wilcoxon-Mann-Whitney es adecuado para comparar 2 grupos no paramétricos
+    test = all_continuous() ~ "wilcox.test", 
+    # Formato del valor p a 3 decimales
+    pvalue_fun = ~ style_pvalue(.x, digits = 3)
+  )
+
+# Mostrar la tabla modelo 3
+tabla_modelo3
+
+## Guardar el objeto flextable directamente como un documento Word
+# Convertir la tabla gtsummary a un objeto flextable
+tabla_modelo3_ft <- tabla_modelo3 %>% 
+  gtsummary::as_flex_table()
+
+flextable::save_as_docx(
+  tabla_modelo3_ft, 
+  path = "Tabla_Modelo_3_Final.docx"
+)
+```
+
+**Expresión génica según categorías de edad**
+
+La Tabla Modelo 3 presenta los estadísticos descriptivos de la expresión génica (mediana y rango intercuartílico) estratificados en función de la edad, categorizada según la mediana de la muestra (edad < P50 vs edad ≥ P50), junto con los valores de *p* obtenidos mediante el test no paramétrico de Wilcoxon-Mann-Whitney para muestras independientes.
+
+En términos generales, la mayoría de los genes analizados - incluyendo genes constitutivos (*ACTB*, *GAPDH*, *B2M*, *RPL13A*, *HPRT1*), genes inflamatorios e inmunológicos (*VEGFA*, *IL6*, *TNF*, *EGFR*, *CXCL8*) y genes relacionados con vías hormonales, proliferación y control genómico (*ESR1*, *HER2*, *BRCA1*, *BRCA2*, *MKI67*, *GATA3*, *FOXA1*, *CCND1*, *CDH1* y *TP53*) - no muestran diferencias estadísticamente significativas entre los dos grupos de edad (p > 0.05). Estos resultados sugieren que, en esta cohorte, la edad de los pacientes no se asocia de forma relevante con cambios en la expresión de los genes analizados.
+
+Sin embargo, se observan dos excepciones. El gen *PTEN* muestra una diferencia estadísticamente significativa (p = 0.019), con una mayor expresión en el grupo de edad < P50. Dado el papel de PTEN como supresor tumoral y regulador negativo de la vía PI3K/AKT, este hallazgo podría indicar una mayor actividad de mecanismos de control del crecimiento celular en pacientes más jóvenes. Asimismo, el gen *CASP3*, implicado en la apoptosis, presenta una diferencia altamente significativa (p = 0.001), con valores de expresión superiores en el grupo de menor edad, lo que sugiere una mayor activación de vías apoptóticas en estos pacientes.
+
+Además, algunos genes como *MYC* (p = 0.059), *VEGFA* (p = 0.084), *TNF* (p = 0.087), *GATA3* (p = 0.097) y *HLAA* (p = 0.094) muestran tendencias cercanas a la significación estadística, con valores generalmente más elevados en el grupo de menor edad, aunque sin alcanzar el umbral de significación. Estos genes participan en procesos clave como proliferación celular (*MYC*), angiogénesis (*VEGFA*), inflamación (*TNF*), regulación hormonal y diferenciación celular (*GATA3*) y presentación antigénica (*HLAA*). Su mayor expresión en pacientes más jóvenes podría reflejar una biología tumoral más activa o un microambiente inmunitario más reactivo en este grupo etario. Estas observaciones deben interpretarse como hallazgos exploratorios que justifican su evaluación en estudios con mayor tamaño muestral y potencia estadística.
+
+EEn conjunto, estos resultados podrían indicar que la edad no constituye un factor determinante global de la expresión génica en la cohorte analizada, aunque algunos genes clave relacionados con apoptosis (*CASP3*) y supresión tumoral (*PTEN*) si podrían estar modulados por la edad. Más aún, podrían existir diferencias biológicas sutiles relacionadas con proliferación, angiogénesis, inflamación y respuesta inmune que no alcanzan significación estadística debido al tamaño muestral limitado.
