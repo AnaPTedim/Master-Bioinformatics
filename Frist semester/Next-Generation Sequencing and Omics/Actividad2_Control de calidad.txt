@@ -1,0 +1,55 @@
+#Control de calidad
+
+# 1. Tener instalado una distribución de conda, ya sea Anaconda o Miniconda
+
+# 2. Creamos un entorno con los programas que vamos a utilizar, como fastqc, fastp, multiqc (importante primero ir a la carpeta donde están las secuencias y crear ahí el entorno de trabajo)
+(base) anasofia@MacBookPro ~ % cd Master_Unir/Primer_trimestre/Secuenciacion_Omicas/Actividad2
+(base) anasofia@MacBookPro Actividad2 %
+conda create -n Actividad2 -c bioconda -c conda-forge -c defaults -c r fastqc fastp multiqc
+
+# 3. Activamos el entorno conda que acabamos de crear
+(base) anasofia@MacBookPro Actividad2 % conda activate Actividad2
+(Actividad2) anasofia@MacBookPro Actividad2 %
+
+# 4. En esta primera parte de control de calidad y filtrado, vamos a comenzar creando las carpetas que necesitaremos en un primer momento:
+mkdir -p Quality/Raw Quality/Filtered Trimmed
+
+# 5. Realizamos el control de calidad con FastQC:
+fastqc *fastq.gz -o Quality/Raw/ -t 32
+
+# 6. Ejecutamos el filtrado de secuencias por calidad y longitud
+## 6.1. En este caso, lo podemos hacer o bien de forma individual, cuando tenemos pocas muestras: 
+fastp --in1 MaggieSimpson_R1* --in2 MaggieSimpson_R2* --out1 Trimmed/MaggieSimpson_R1_filtered.fastq.gz --out2 Trimmed/MaggieSimpson_R2_filtered.fastq.gz --detect_adapter_for_pe --cut_front --cut_tail --cut_window_size 12 --cut_mean_quality 20 --length_required 35 --json Trimmed/MaggieSimpson.json --html Trimmed/MaggieSimpson.html --thread 32
+
+## 6.2. O mediante un bucle cuando son muchas, en este caso habría que incluir todos los nombres de las muestras en un fichero, por ejemplo muestras.txt, un identificador por línea y ejecutar el bucle:
+ls *fastq.gz | cut -d _ -f 1 | sort -u > muestras.txt (Para crear un listado de muestras.txt)
+for i in $(cat muestras.txt); do fastp --in1 $i*R1* --in2 $i*R2* --out1 Trimmed/$i"_R1_filtered.fastq.gz" --out2 Trimmed/$i"_R2_filtered.fastq.gz" --detect_adapter_for_pe --cut_front --cut_tail --cut_window_size 12 --cut_mean_quality 30 --length_required 35 --json Trimmed/$i.json --html Trimmed/$i.html --thread 32; done
+
+# 7. Ejecutamos de nuevo un segundo control de calidad para corroborar que hemos realizado correctamente el filtrado
+fastqc Trimmed/*fastq.gz -o Quality/Filtered/ --threads 32
+
+# 8. Podemos generar un informe resumen de los pasos que hemos realizado con multiqc:
+multiqc .
+
+##multiqc: ejecuta el programa MultiQC
+##. “analiza todo lo que haya en este directorio y sus subdirectorios”
+
+# 9. Desactivar el ambiente conda:
+(Actividad2) anasofia@MacBookPro Actividad2 % conda deactivate
+(base) anasofia@MacBookPro Actividad2 %
+
+# 10. Creamos y activamos un entorno con salmon (en el caso de mac me daba problemas cuando lo metia con los demás por mitivos de incompatibilidad)
+conda create -n rnaseq_salmon -c bioconda -c conda-forge salmon
+conda activate rnaseq_salmon
+
+#11. Creamos un trancriptoma de referencia (para esto tenéis que estar en la carpeta Genes en este caso)
+cat /.fna > Transcriptoma_referencia_creado.fasta
+
+#12. Indexamos el transcriptoma de referencia a salmon 
+salmon index -t Transcriptoma_referencia.fasta -i salmon_index_obesidad -k 31
+
+# 13. Hacer la cuantificación de los transcriptos usando Salmon
+salmon quant -i salmon_index_Tcreado -l A -1 MaggieSimpson_R1.fastq.gz -2 MaggieSimpson_R2.fastq.gz -o MaggieSimpson_quant_creado
+(lo hice uno a uno como no eran muchos sustituyendo el nombre de las muestras y el output)
+
+Continua en el script de R
