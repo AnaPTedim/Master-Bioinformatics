@@ -1,0 +1,406 @@
+---
+title: "Actividad 1 - Algoritmos e Inteligencia Artificial"
+author: "Ana Sofia Santos Tedim Sousa Pedrosa"
+date: "24-11-2025"
+output: html_document
+---
+
+## Aplicación de técnicas de aprendizaje no supervisado sobre datos biológicos
+
+```{r setup, include=TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(ggplot2)
+library(stats)
+#El siguiente código  es necesario para que las librerías rgl y RDRToolbox funcionen en  ordenadores  macOS con versiones sin OpenGL (Tahoe o superiores) como es el caso de aquel donde se ha realizado esta actividad.
+options(rgl.useNULL = TRUE) 
+Sys.setenv(RGL_USE_NULL = "TRUE")
+library(rgl)
+library(RDRToolbox)
+library(Rtsne)
+library(uwot)
+library(factoextra) 
+library(cluster)
+library(tidyverse)
+library(gridExtra)
+
+#Se colocó una semilla para que los análisis sean replicables en todo el momento. Para la mayoría de los algoritmos usados no seria necesario con la excepción de t-SNE pero se puede usar para todos y por eso se ha colocado en el chunk de setup.
+set.seed(1234)
+
+```
+
+```{r cargar los datos}
+
+#######################
+# 1. Carga de los datos
+#######################
+
+#Carga de los datos crudos.
+Datos_crudos <- read.csv("data.csv") 
+
+#Carga de las etiquetas del tipo de cáncer de cada paciente.
+Etiquetas_pacientes <- read.csv("labels.csv")
+
+```
+
+#### Pregunta 2. Procesamiento de los datos: ¿Qué problemas has detectado en el conjunto de datos que te han sido proporcionados? ¿Cómo los has solucionado?
+
+Aun que esta pregunta es la número 2 en el enunciado es prudente empezar a analizar los datos haciendo una exploración de los mismos para detectar problemas antes de proceder al análisis.
+
+El conjunto de datos a analizar es de alta dimensión ya que el numero de variables es más de 10 veces más grande que el número de muestras. En el *chunck* de código se puede ver que empezamos por **visualizar y verificar la estructura** de los datos del dataframe correspondiente a la expresión génica usando *str()* y también se verificó, usando *table()*, las frecuencia de muestras de cada tipo de cáncer.
+
+Se **comprobó si todas las columnas eran numéricas** y si verificó que no era el caso y se procedió a la identificación de las columnas no numéricas (en este caso la columna 1 que los datos eran del tipo *character*). Se retiró la columna 1 y se volvió a verificar si todos los datos eran numéricos, pero para asegurar se uso **data.frame(sapply(), as.numeric)** para garantizar que todos los datos eran numéricos.
+
+Se procedió a **contar el número de ceros** del conjunto de datos y se hizo una representación gráfica de los mismo por gen y se observó que para 267 variables todos sus valores son cero (ver tabla_final_ceros). Esto podría ser resultado de un error metodológico o que los valores de expresión están por debajo del limite de detección de la técnica. Independientemente del motivo, estos genes no contienen información biológica ni estadística útil, ya que su varianza es cero y no contribuyen a la separación entre muestras. Por ello, se eliminaron estas columnas antes de aplicar las técnicas de reducción de dimensionalidad y algoritmo de clusterización.
+
+```{r procesamiento de los datos}
+###############################
+# 2. Procesamiento de los datos
+###############################
+
+#Visualizar y verificar los datos.
+str(Datos_crudos, list.len = 11) #verificar la estructura del dataframe pero solo las primera 10 columnas (para que no quede demasiado largo en el documento final).
+
+table(Etiquetas_pacientes$Class) #contar cada clase en la columna Class para saber cuantas muestras hay de cada tipo de cáncer (devuelve una tabla de frecuencias).
+
+#Comprobar si todas las columnas son números.
+all(sapply(Datos_crudos, is.numeric))
+
+#Determinar cual columna no es numérica.
+which(!sapply(Datos_crudos, is.numeric)) #permite saber cual es la columna que no es numérica que en este caso es la primera.
+
+#Eliminar la columna que no es numérica (en este caso da primera).
+datos_num <- Datos_crudos[, -1]
+
+#Verificar si la columna se ha eliminado.
+str(datos_num, list.len = 11) # en este caso como era la primera columna por lo que se simplemente se volvió a ver la estructura de los primeros 10 valores del dataframe.
+
+#Verificar si hay NAs en los datos después de eliminar la primera columna.
+sum(is.na(datos_num))
+
+#Convertir todas las columnas de valores de expresión génica a numérico para garantizar que todos son números.
+datos_num_2<- data.frame(sapply(datos_num, as.numeric))
+
+#Verificar la presencia de zeros en el dataframe.
+any(datos_num_2 == 0)
+num_ceros <- colSums(datos_num_2 == 0)
+
+#Contar de ceros.
+cero_df <- data.frame(
+  variable = names(num_ceros),
+  ceros = as.numeric(num_ceros)
+)
+
+#Determinar el número de variables en todas las observaciones son cero
+tabla_final_ceros <- cero_df %>%
+  count(ceros, name = "n_variables") %>%
+  arrange(desc(ceros))
+
+head(tabla_final_ceros)
+
+#Representación gráfica de ceros.
+ggplot(cero_df, aes(x = variable, y = ceros, fill = variable)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Número de ceros por columna",
+       x = "Variable",
+       y = "Número de ceros") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+#Eliminar las variables que todos los valores son cero.
+datos_num_2 <- datos_num_2[, colSums(datos_num_2 == 0) != nrow(datos_num_2)]
+
+#Guardar el dataframe que vamos a usar como matriz que es necesario para aplicar a varios de los algoritmos.
+datos_matriz <- as.matrix(datos_num_2)
+
+```
+
+#### Pregunta 1. Ambiente y librerías de trabajo: ¿Qué librerías han sido necesarias para llevar a cabo la implementación de cada uno de los métodos de aprendizaje no supervisado? Explica el rol de los argumentos de las funciones que has utilizado en cada método de reducción de dimensionalidad.
+
+Para la realización de esta actividad se han usado 4 métodos de aprendisaje no supervisionado: **PCA** (Principal Component Analysis), **Isomap** (Isometric Mapping), **t-SNE** (T-Distributed Stochastic Neighbor Embedding) y **UMAP** (Uniform Manifold Approximation and Projection). Estos métodos se se usaron como métodos de reducción de dimensionalidad.
+
+Se ha usado también un método de clusterización (**Clusterización jerárquica aglomerativa, HCA**) ya que es una método de aprendizaje no supervisionado (fue sugerido en clase que aplicáramos un método de clusterización), se ha decidido aplicar HCA sobre los resultados obtenidos del análisis de PCA. Es bastante frecuente usar esta combinación metodológica, en que **PCA** actúa como un paso de preprocesamiento en el que se reduce la alta dimensionalidad de los datos y se filtra el ruido, centrándose solo en la información que explica la mayor varianza. A su vez **HCA** es aplicado a los datos preprocesados para definir agrupaciones o clústeres de muestras o variables y visualizar su relación mediante un dendograma. Esta secuencia mejora la eficiencia computacional y garantiza que el *clustering* se base en los patrones biológicos más relevantes.
+
+##### PCA: Principal Componente Analysis
+
+Para aplicar **PCA** se usó la librería *stat()* con la función *prcomp()*. Para la representación gráfica de las dos primeras componentes principales se usó la librería *ggplot2* con la función *ggplot*.
+
+Dentro de la función *prcomo()* se deben especificar las variables: ***data*** que se refiere a los datos que queremos analizar; ***center*** al cual si da el valor booleano TRUE si pretendemos que las variables se encuentren centradas en cero; y ***scale*** la cual también asume un valor booleano TRUE si pretendemos escalar los datos. El escalado de datos se hace cuando en el conjunto de datos a analizar existen variables con valores, unidades y/o magnitudes muy diferentes (ejemplo: peso, altura, concentración de glucosa en sangre, etc). En este caso todos los valores se refieren a expresión génica y sus unidades y magnitud son semejantes.
+
+```{r PCA}
+###############################################
+# 3. Algoritmos de redución de dimensionadad
+###############################################
+# 3.1. PCA: Analisis de componentes principales 
+###############################################
+
+#Calcular las componentes principales con la función prcomp.
+pca_results <- prcomp(datos_num_2, center=TRUE, scale.=FALSE)
+
+#Pasar los resultados de análisis PCA a un dataframe.
+pca_df <- data.frame(pca_results$x)
+
+#Seleccionar las componentes principales que explican el 90% de la varianza y que van a ser usadas en el análisis de HCA:
+##Extraer la varianza de los resultados de PCA.
+varianza <- pca_results$sdev^2
+
+##Calcular la varianza total de los datos.
+total_varianza <- sum(varianza)
+
+##Calcular la varianza explicada por cada componente principal.
+varianza_explicada <- varianza/total_varianza
+
+##Calcular la varianza acumulada de las componentes principales
+varianza_acumulada <- cumsum(varianza_explicada)
+
+#Seleccionar las componentes principales que explican el 90% de la varianza creando un nuevo dataframe.
+PCA_90 <- min(which(varianza_acumulada > 0.90))
+
+PCA_for_HCA <- data.frame (pca_results$x[, 1:PCA_90])
+
+head(PCA_for_HCA[, 1:5], 6)
+
+#Preparar las etiquetas de los ejes del gráfico para que las veamos como PC1 XX.XX% y PC2 XX.XX%.
+x_label <- paste0(paste('PC1', round(varianza_explicada[1] * 100, 2)), '%')
+y_label <- paste0(paste('PC2', round(varianza_explicada[2] * 100, 2)), '%')
+
+#Representar gráficamente las dos primeras componentes principales respecto a los datos.
+ggplot(pca_df, aes(x=PC1, y=PC2, color=Etiquetas_pacientes$Class)) +
+  geom_point(size=3) +
+  scale_color_manual(values=c('#FF1493', '#1E90FF', '#90EE90', '#FA8072', '#6A5ACD')) +
+  labs(title='PCA para Tipos de Cáncer', x=x_label, y=y_label, color='Grupo') +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+##### Isomap: Isometric Mapping
+
+Para aplicar **Isomap** se usó la librería *RDRToolbox* con la función *Isomap()*. Para la representación gráfica de las dos primeras dimensiones se usó la librería *ggplot2* con la función *ggplot*.
+
+Dentro de la función *Isomap()* se deben especificar las variables: ***data*** que se refiere a los datos que queremos analizar que en este caso se deben introducir como una matriz de datos; ***dims*** que se refiere al rango de dimensiones a calcular que puede ser un número o un vector, realmente se refiere a la dimensión del espacio reducido; ***k*** que se refiere al número de vecinos cercanos a cada punto que serán usados para construir el grafo geodésico, y ***plotResiduals*** que se refiere a un valor booleano que será TRUE cuando se pretende que devuelva la varianza explicada por las diferentes dimensiones.
+
+```{r Isomap}
+################################
+# 3.2. Isomap: Isometric Mapping
+################################
+
+#Calcular Isomap de 1 a 10 dimensiones y con 15 vecinos.
+isomap_results = Isomap(data=datos_matriz, dims=1:10, k=15, plotResiduals=TRUE)
+
+#Pasar los resultados de análisis Isomap (dim2) a un dataframe.
+isomap_df <- data.frame(isomap_results$dim2) 
+
+#Representar gráficamente.
+ggplot(isomap_df, aes(x = X1, y = X2, color = Etiquetas_pacientes$Class)) +
+  geom_point(size = 3) +
+  scale_color_manual(values = c('#FF1493', '#1E90FF', '#90EE90', '#FA8072', '#6A5ACD')) +
+  labs(title = "Isomap para Tipos de Cáncer", x = 'Dim 1', y = 'Dim 2', color = "Grupo") +
+ theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+##### t-SNE:T-Distributed Stochastic Neighbor Embedding
+
+Para aplicar **t-SNE** se usó la librería *RtSNE* con la función *Rtsne()*. Para la representación gráfica de las dos primeras dimensiones se usó la librería *ggplot2* con la función *ggplot*.
+
+Dentro de la función *Rtsne()* se deben especificar las variables: ***X*** que se refiere a los datos que queremos analizar que en este caso se deben introducir como una matriz de datos; y ***dims*** que se a las dimensiones finales del conjunto de datos. Debe ser menor que 3 por la eficiencia del método.
+
+En este casa es aconsejable colocar una semilla para que el método sea reproducible ya que es un algoritmo estocástico y sin una semilla fija producen resultados diferentes cada vez que se ejecutan. La semilla se colocó en el *chunk setup* ya que así se usa en todos los métodos.
+
+```{r t-SNE}
+########################################################
+#3.3 t-SNE: T-distributed Stochastic Neighbor Embedding
+########################################################
+
+#Calcular el t-SNE.
+tsne_results <- Rtsne(X=datos_matriz, dims = 2)
+
+#Pasar los resultados del análisis de t-SNE (Y) a un dataframe.
+tsne_df <- data.frame(tsne_results$Y)
+
+#Representar gráficamente.
+ggplot(tsne_df, aes(x = X1, y = X2, color = Etiquetas_pacientes$Class)) +
+  geom_point(size = 3) +
+  scale_color_manual(values = c('#FF1493', '#1E90FF', '#90EE90', '#FA8072', '#6A5ACD')) +
+  labs(title = "t-SNE para Tipos de Cáncer", x = 'Dim 1', y = 'Dim 2', color = "Grupo") +
+ theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+##### UMAP: Uniform Manifold Approximation and Projection
+
+Para aplicar **UMAP** se usó la librería *uwot* con la función *umap()*. Para la representación gráfica de las dos primeras dimensiones se usó la librería *ggplot2* con la función *ggplot*.
+
+Dentro de la función *umap()* se deben especificar las variables: ***X*** que se refiere a los datos que queremos analizar que en este caso se deben introducir como una matriz de datos; ***n_neighbours*** se refiere a un número entero que indica el número de vecinos cercanos; ***n_componentes*** es un número entero que determina el tamaño del espacio de salida; ***metric*** es la variable que define la distancia entre puntos por defecto es *eucledian*; ***min_dist*** se refiere a la distancia mínima permitida entre puntos; ***local_conectivity*** por defecto asegura que cada punto tenga al menos un vecino conectado; ***scale*** permite definir el tipo de escalado que se quiere aplicar a la matriz de datos; ***ret_model*** permite para guardar el modelo complete entrenado de UMAP; y ***verbose*** es el parámetro que controla la cantidad de información que UMAP imprime durante su ejecución. Puede ser muy útil en grandes bases de datos para monitorizar la ejecución del algoritmo (en este caso para simplificar el html he decidido mantenerla en FALSE).
+
+```{r UMAP}
+##########################################################
+# 3.4. UMAP: Uniform Manifold Approximation and Projection
+##########################################################
+
+#Calcular UMAP.
+umap_results <- umap(datos_matriz, 
+                     n_neighbors=0.2 * nrow(datos_matriz),
+                     n_components = 2, 
+                     min_dist = 0.1,
+                     local_connectivity=1, 
+                     ret_model = TRUE)
+
+#Pasar los resultados del análisis de UMAP (*embedding*) a un dataframe
+umap_df <- data.frame(umap_results$embedding)
+
+#Representar gráficamente.
+ggplot(umap_df, aes(x = X1, y = X2, color = Etiquetas_pacientes$Class)) +
+  geom_point(size = 3) +
+  scale_color_manual(values = c('#FF1493', '#1E90FF', '#90EE90', '#FA8072', '#6A5ACD')) +
+  labs(title = "UMAP para Tipos de Cáncer", x = 'Dim 1', y = 'Dim 2', color = "Grupo") +
+ theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+###### HCA: Clusterización jerárquica aglomerativa
+
+Para **HCA** se usaron los datos de las componentes principales ya que es un conjunto de datos de menores dimensiones, en el cual también se ha eliminado el ruido y por lo tanto mejora el comportamiento de HCA.
+
+Para la implementación del algoritmo se usó primero la librería ***stats*** para crear la matriz de distancias usando la función ***dist()*** que automáticamente genera una matriz de distancia euclideana.
+
+Para ejecutar el algoritmo de HCA se usó la función ***hclust()*** en la que se definió el método de clusterización ***method*** como ward.D ya que agrupa los clusters tratando de que sean lo más compactos posible minimizando la dispersión interna y que es de los más usando en datos de transcriptómica.
+
+Para hacer el dendograma partiendo del modelo *hclust* se usa la librería ***factoextra*** con la función ***fviz_dend()***. Dentro de esta función los argumentos clave son ***k*** que define el número de clústeres que se quiere resaltar; ***k_colors*** define los colores personalizados para cada uno de los clústeres k; ***cex*** que especifica el tamaño del texto; ***main***, ***xlab***, ***ylab*** que definen título, etiqueta eje x y etiqueta eje y, respectivamente.
+
+```{r HCA, fig.width=14, fig.height=6, warning=FALSE}
+##########################################################
+# 3.5. HCA: Clusterización jerárquica aglomerativa
+##########################################################
+
+#Renombrar las filas con las etiquetas de datos.
+##Obtener la variable de las etiquetas de cáncer.
+cancer_labels <- Etiquetas_pacientes$Class
+##Crear una secuencia única de índices (del 1 al número de muestras).
+sample_indices <- 1:nrow(PCA_for_HCA)
+##Crear las nuevas etiquetas de fila únicas ("BRCA_1", "BRCA_2", "LUAD_3"...).
+unique_labels <- paste(cancer_labels, sample_indices, sep = "_")
+##Asignar las etiquetas únicas como nombres de fila.
+row.names(PCA_for_HCA) <- unique_labels
+
+#Calcular la matriz de distancia.
+dist_matrix_HCA <- dist(PCA_for_HCA)
+
+#Ejecutar el algoritmo de HCA.
+hclust_model_ward <- hclust(dist_matrix_HCA, method = "ward.D") 
+
+#Representar gráficamente.
+fviz_dend(hclust_model_ward, 
+          cex = 0.2,
+          k = 5,
+          k_colors = c('#FF1493', '#1E90FF', '#90EE90', '#FA8072', '#6A5ACD'),
+          main = "HCA usando el método Ward",
+          xlab = "Índice de Observaciones",
+          ylab = "Distancia") + 
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+#Asignar el cluster al que pertenece cada elemento.
+PCA_for_HCA$cluster_ward <- as.factor(cutree(hclust_model_ward, k = 5))
+
+#Determinar el orden en que se encuentran las muestras en el dendograma para saber a que tipo de cáncer corresponde cada color en el dendograma.
+orden_muestras_dend <- labels(hclust_model_ward)
+head(orden_muestras_dend, 30) #Se ha colocado aquí que se vean solo las primeras 30 observaciones del vector para no ocupe demasiado en la actividad. Para verificar el orden se visualizó todas las observaciones del vector. Se comprobó que el orden de los clusters en el dendograma es: KIRC, PPRAD, BRCA, LUAD, COAD.
+
+```
+
+#### Pregunta 3. Métodos no supervisados:
+
+##### 3.1. ¿Cuál es el motivo por el cual has seleccionado estas técnicas de reducción de dimensionalidad? (1 punto).
+
+Para realizar esta actividad se han seleccionado las técnicas de reducción de dimensionalidad PCA, Isomap, t-SNE y UMAP ya que cada una captura estructuras diferentes del conjunto de datos, permitiendo obtener una visión complementaria de la variabilidad biológica en los perfiles de expresión génica del los 5 tipos diferentes de tumor analizados.
+
+**PCA** es un método lineal, muy eficiente y ampliamente usado en transcriptómica. Se selecciono este método porque permite eliminar ruido, identificar los ejes que explican mayor varianza biológica, y servir como paso previo para métodos de clustering (como HCA).
+
+**Isomap** es un método no lineal basado en distancias geodésicas. Se seleccionó este método por ser adecuado cuando los datos pueden estar “curvados” o distribuidos sobre un espacio no lineal, algo que ocurre frecuentemente en datos de expresión génica complejos, como es el caso.
+
+**t-SNE** es un método no lineal y un algoritmo estocástico excelente para visualización de datos de alta dimensión. Se seleccionó este método porque preserva muy bien la estructura local, mostrando clústeres muy definidos incluso cuando la separación global entre clases es más compleja.
+
+**UMAP** es un método moderno, rápido y altamente utilizado en análisis de transcriptómica. Se seleccionó este método porque preserva tanto estructura local como global, produce gráficos más estables que t-SNE, y ofrece separaciones claras entre los clusters.
+
+**HAC** se aplicó en este caso a los resultados de PCA en el cual se seleccionaron las componentes principales que explicaban \>90% de la varianza de los datos (n=311). Esta combinación puede ser bastante útil ya que se reduce el ruido y la redundancia de los datos antes de aplicar el HCA. Este es un método de clusterización en el cual no es necesario fijar un número de clusters para su aplicación, lo que hace con que este métodos sea muy útil para datos que pueden presentar un estructura real compleja. Además la visualización del cluster en un dendograma permite observar fácilmente la relación entre las muestras de diferentes pacientes y ofrece información adicional sobre la similitud entre subtipos tumorales.
+
+##### 3.2. ¿Qué aspectos positivos y negativos tienen cada una de las técnicas escogidas? (0,5 puntos).
+
+Los principales aspectos ***positivos*** de **PCA** son: i) que es un método rápido y computacionalmente eficiente; ii) que es un método de fácil interpretación; iii) que es un método especialmente efectivo cuando el conjuntos de datos presenta variables muy correlacionadas; iv) que mejora la independencia de los datos ya que elimina correlaciones entre las variables.
+
+Los principales aspectos ***negativos*** de **PCA** son: i) que es un método lineal y por lo tanto solo funciona adecuadamente cuando los datos presentan estructuras lineales fuertemente correlaccionadas; ii) que normalmente necesita procesos de estandarización previos a la aplicación del método; iii) que si la estructura real de los datos es muy compleja se puede perder información relevante.
+
+Los principales aspectos ***positivos*** de **Isomap** son: i) que es especialmente eficiente cuando los datos tiene una relación no lineal debido al uso de distancias geodésicas (adecuado para datos con "curvaturas"); ii) que preserva bien la estructura global de los datos cuando los proyecta en espácio de menor dimensión.
+
+Los principales aspectos ***negativos*** de **Isomap** son: i) que puede resultar difícil determinar las distancias entre los puntos en el espacio de mayor dimensión si no existe suficiente densidad de puntos lo que llevaría a distancias adulteradas en el espacio de menor dimensión; ii) que es muy sensible al parámetro k correcto, incluso cuando este existe. Si este parámetro es demasiado pequeño el grafo se desconecta; si es demasiado grande el grafo podría ser demasiado denso, lo que implicaría la determinación de distancias incorrectas.
+
+Los principales aspectos ***positivos*** de **t-SNE** son: i) que es excelente para visualizar clusters de datos bien definidos, ya que supera muchas otras técnicas en manejo eficiente de datos no lineales; ii) que preserva muy bien la estructura local de los datos a la vez que permite visualizar la estructura global de los mismo cuando los mapea en un estructura de menor dimensionalidad (ver aspecto negativo abajo); iii) que es muy útil cuando los clústeres son muy densos o complejos.
+
+Los principales aspectos ***negativos*** de **t-SNE** son: i) que al ser un método estocástico tiene un cierto componente de azar lo que claramente afecta su reproducibilidad (en R si no se usa una semilla los resultados cambian cada vez que se usa el método incluso sobre el mismo conjunto de datos) y la posibilidad de introducción o cambio en los datos; ii) que en general no preserva bien la estructura global de los datos es decir que las distancias entre clústeres en el espacio de menor dimensión no son interpretables; iii) que su rendimiento es eficiente en conjuntos no muy grandes da datos (sobretodo muestras), sin embargo, cuando hay muchas muestras es computacionalmente muy costoso; iv) que su rendimiento está demostrado cuando reducimos la dimensionalidad a hasta 3 dimensiones pero para más dimensiones su rendimiento no está muy claro, sin embargo si usa mucho para la visualización de datos.
+
+Los principales aspectos ***positivos*** de **UMAP** son: i) que preserva mejor que t-SNE la estructura tanto local como global del conjunto de datos; ii) que es un método muy rápido y eficaz a la hora de reducir la dimensionalidad de los datos, incluso con muchos datos, lo que lleva a que se ampliamente usado en el campo de las ciencias ómicas iii) que permite usar un modelo previamente entrenado (cuando se usa la función ret_model =TRUE) para proyectar nuevas muestras (usando predict()) en el mismo espacio, usando la estructura aprendida anteriormente.
+
+Los principales aspectos ***negativos*** de **UMAP** son: i) que es un método muy sensible a los parámetros que pueden ser definidos por el usuario, como n_neighbors y min_dist, lo que dificulta encontrar la proyección óptima por el elevado número de combinaciones posibles de estos parámetros; ii) que dependiendo de los parámetros usados puede ser computacionalmente costoso, aún que en general es menos costoso que otros métodos como t-SNE; iii) que tiene un componente estocástico, tal como t-SNE, pero al contrario de t-SNE los resultados son casi idénticos cada vez que se usa UMAP con el mismo conjunto de datos.
+
+Los principales aspectos ***positivos*** de **HCA** son: i) que no requiere que se fijen previamente un número de clusters k; ii) que permite visualizar la estructura global del conjunto de datos mediante un dendograma, mostrando relaciones de similitud entre las muestras; iii) que es un método determinista y funciona especialmente bien cuando se aplica sobre datos previamente reducidos con PCA (o otro método de reducción de dimensionalidad), ya que la eliminación de ruido hace que las distancias sean más informativas; iv) que es algo más resistente a los valores atípicos que otros métodos de clusterización; v) que permite estudiar la jerarquía de fusiones entre grupos, algo que no ofrecen otros métodos de clustering.
+
+Los principales aspectos ***negativos*** de **HCA** son: i) que es un método que escala peor que otros algoritmos cuando el número de muestras es grande, ya que requiere calcular todas las distancias entre pares; ii) que es muy sensible a la elección de la métrica y del método de enlace (*linkage*), lo que puede dificultar la determinación de clusterización óptima y alterar el dendograma; iii) que es sensible a cambios en el conjunto de datos (eliminar o añadir muestras al azar podría llevar a un clusterización distinta).
+
+##### 3.3. Comenta para cada caso el resultado de representar gráficamente las primeras dos variables de cada uno de los métodos. ¿Qué se observa? ¿Tiene sentido biológico? Razona tu respuesta (1 punto).
+
+##### Interpretación de la gráfica PCA
+
+En el gráfico de PCA se representó gráficamente la componente principal 1 (PC1) y la componente principal 2 (PC2) que explican un 15.85% y un 10.5% de la varianza total de las variables. La representación gráfica de estas los componentes principales separa parcialmente los diferentes tipos de cáncer. Los tipos que mejor se separan son el *Carcinoma de células renales claras* (KIRK, representado en verde claro) y el *Adenocarcinoma de próstata* (PRAD, representado en morado). Los restante tipos de cáncer están ligeramente separados pero esta separación entre los 3 tipos no es clara.
+
+Los resultados observados tienen sentido biológico ya que PCA captura la máxima varianza global lineal, que en este contesto significa que separa los tipos de cáncer con diferencias más obvias según los datos que le hemos introducido que son KIRK y PRAD (cánceres urogenitales). El echo de los demás tipos de cáncer no se separen completamente significa que según estas dos primeras componentes principales, que en explican un 26.3% de la varianza total, sus patrones de expresión son más parecidos.
+
+##### Interpretación de la gráfica Isomap
+
+En la representación de las dos primeras dimensiones de Isomap se observa una separación más clara entre los diferentes tipos de cáncer que en la gráfica de las dos componentes principales de PCA.
+
+Los resultados presentados tienen sentido biológico ya que Isomap, preservando las distancias geodésicas, permite identificar estructuras no lineales que PCA no puede capturar, y así permite separar de forma más eficiente los diferentes tipos de cáncer. Esta mejor separación indica que la verdadera diferencia biológica (las trayectorias de expresión génica) entre estos tipos de cáncer no es lineal. La estructura conseguida con Isomap parece ser más fidedigna de las similitudes y diferencias moleculares entre los diferentes tipos de cáncer.
+
+En esta caso parece haber algunos valores atípicos, es decir, muestras de un tipo de cáncer que se agrupan con otro tipo de cáncer distinto, y que se encuentran más centrales en la gráfica. Seria importante verificar estas muestras para confirmar si esto es un error de clasificación o si efectivamente estas muestras tienen un comportamiento distinto.
+
+##### Interpretación de la gráfica t-SNE
+
+En la representación gráfica de los resultados del algoritmos t-SNE los clústeres son más compactos y claramente definidos. Cada tipo de tumor diferente forma un grupo denso, con fronteras mucho más delineadas que en el caso de PCA o Isomap.
+
+Los resultados observados tienen sentido biológico ya que t-SNE está diseñado para preservar la estructura local a expensas de la estructura global, es decir, mantiene juntas las muestras que tienen perfiles de expresión génica muy semejantes sin tener tanto en cuenta como se asocian entre si. Teniendo en cuenta lo compactos que son los clusters en la gráfica los perfiles de expresión dentro de cada tipo de cáncer son bastante similares. Sin embargo, la distancia entre los clústeres en el gráfico t-SNE no puede interpretarse como una medida de similitud global. Esto significa que, aunque la homogeneidad dentro del grupo es clara, la relación o disimilitud entre los grupos no es tan fiable en t-SNE como en UMAP o Isomap.
+
+En esta gráfica puede aún apreciarse que hay una separación dentro del *Cáncer de mama invasivo* (BRCA, representado en rosa), en que se observan dos grupos uno de mayor tamaño y otro de menor tamaño. Esto parece indicar que dentro del grupo de BRCA hay diferentes subtipos según los datos de expresión génica. Para confirmar estos resultados habría que realizar un análisis más especifico y solo con las muestras de BRCA.
+
+Además, también hay alguna muestra atípica que seria necesario comprobar: una muestra clasificada como de *Adenocarcinoma de pulmón*, LUAD, que se agrupa con BRCA y una muestra clasificada como de *Adenocarcinoma de colon*, COAD, que se agrupa con LUAD.
+
+##### Interpretación de la gráfica UMAP
+
+En la representación gráfica de UMAP produce una clara separación de los distintos tipos de cáncer, similar a t-SNE, pero con clústeres que parecen mantener mejor las distancias relativas, es decir, la estructura global. UMAP logra mantener un mejor equilibrio entre la preservación de la estructura local y global.
+
+Se observan clústeres bien formados según el tipo de cáncer lo que indica patrones de expresión únicos consistentes con la biología de cada uno de los tipos de cáncer. La mayor proximidad observada entre KIRC y PRAD (ambos tumores urogenitales) sugiere que UMAP ha logrado capturar alguna similitud subyacente en el perfil de expresión entre estos dos tipos de cáncer.
+
+UMAP suele ser uno de los métodos más usados en transcriptómica precisamente porque logra respetar tanto relaciones locales como globales, logrando un representación más fiel de la estructura biológica de los datos en comparación con t-SNE.
+
+Una vez más se observa un segundo cluster, más pequeño, dentro de la agrupación BRCA lo que parece indicar la presencia de diferentes subtipos de carcinoma de mama dentro en estas muestras. Habría, tal como ya se sugerió en el análisis con t-SNE, que habría que confirmar estos resultados realizando un análisis más especifico y solo con las muestras de BRCA.
+
+##### Interpretación de la gráfica HCA
+
+El dendograma generado mediante HCA usando el método de Ward muestra cinco clústeres bien definidos y compactos, lo que indica una alta similitud entre las muestras dentro de cada grupo, es decir, de cada tipo de cáncer, como se ve reflejado en las etiquetas. Estos resultados confirman que el perfil de expresión génica dentro de cada tipo de cáncer es más similar entre sí que con respecto a otros tipos.
+
+Las fusiones entre clústeres ocurren a distancias elevadas, evidenciando diferencias marcadas entre los grupos. Además, algunos clústeres se unen antes que otros, reflejando relaciones de mayor proximidad entre ciertos perfiles transcriptómicos. Es curioso que los primeros perfiles en conectarse sean los de los LUAS y COAD, seguido se BRCA y solo después se unan los dos cánceres del foro urogenital (KIRC y PRAD).
+
+En conjunto, la estructura jerárquica observada es coherente con lo esperado en datos RNA-seq para diferentes tipos de cáncer en el cual cada tipo presente patrones de expresión claramente diferenciados.
+
+**CONCLUSIÓN**
+
+En resumen, el análisis no supervisado aplicado a los datos de expresión génica de diferentes tipos de cáncer permitió identificar de manera clara la estructura biológica subyacente entre los distintos tipos. 
+
+Los métodos lineales y no lineales de reducción de dimensionalidad, junto con la clusterización jerárquica, coinciden en que cada tipo de cáncer presenta un perfil transcriptómico distintivo y consistente, generando clústeres bien definidos y coherentes con la biología conocida (en la gran mayoría de los casos).
+
+La presencia de subgrupos dentro de BRCA es consistente con lo que se sabe de la biología de este tipo de cáncer y sería importante realizar un análisis más específico. 
+
+El análisis realizado en esta actividad demuestra la importancia de combinar múltiples técnicas de aprendizaje no supervisadas para obtener una visión robusta, complementaria y multidimensional de los datos ómicos. Este análisis exploratorio constituye una base sólida para futuros análisis, identificación de subtipos (como en el caso del BRCA) y identificación de posibles rutas metabólicos involucrados en los diferentes tipos de cáncer.

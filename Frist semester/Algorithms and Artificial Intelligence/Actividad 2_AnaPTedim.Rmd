@@ -1,0 +1,324 @@
+---
+title: Actividad 2. Aplicación de técnicas de aprendizaje supervisado sobre datos
+  biológicos
+author: "Ana Sofia Santos Tedim Sousa Pedrosa"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    theme: simplex
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+    echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width=8, 
+  fig.height=15
+)
+
+###############################
+# 1. Preparación del entorno. #
+###############################
+
+# Instalación de paquetes (retirar # de las lineas abajo si no están instalados os packages necesários)
+# install.packages("tidyverse")
+# install.packages("caret")
+# install.packages("MASS") 
+
+# Carga de librerías necesarias para que funcione el código
+library(tidyverse)
+library(caret)
+library(MASS)
+
+# Crear una semilla para reproducibilidad del análisis en todo el momento
+set.seed(1234)
+```
+## Introducción y justificación de los métodos selecionados para el análisis supervisionado de los datos en esta actividad
+
+En este trabajo se seleccionaron tres métodos de aprendizaje supervisado - Análisis Discriminante Lineal (LDA), k vecinos más cercanos (k-NN) y Máquinas de Vectores de Soporte (SVM) - con el objetivo de abordar el problema de clasificación de muestras biológicas desde enfoques metodológicos complementarios y ampliamente utilizados en bioinformática.
+
+El **Análisis Discriminante Lineal (LDA)** fue elegido como un método estadístico clásico de referencia, especialmente adecuado para problemas de clasificación multivariante con variable respuesta categórica. LDA permite modelar la separación entre clases a partir de combinaciones lineales de las variables predictoras y resulta particularmente relevante en el análisis de datos biológicos de alta dimensión cuando se desea una interpretación directa de las variables que contribuyen a la discriminación entre grupos. Además, este método está explícitamente abordado en el temario de la asignatura y es frecuentemente empleado en estudios de expresión génica y clasificación de muestras biológicas.
+
+El algoritmo de **k vecinos más cercanos (k-NN)** se incluyó como un método no paramétrico y basado en distancias, que no asume ninguna distribución previa de los datos. Su incorporación permite evaluar el rendimiento de un enfoque más flexible y dependiente de la estructura local de los datos, lo cual resulta de interés en contextos bioinformáticos donde las relaciones entre variables pueden ser complejas y no lineales. Asimismo, k-NN es sensible a la escala de las variables y se beneficia del preprocesamiento aplicado, lo que lo convierte en un buen complemento para comparar con métodos paramétricos como LDA.
+
+Por último, se emplearon **Máquinas de Vectores de Soporte (SVM)** debido a su capacidad para manejar problemas de clasificación en espacios de alta dimensionalidad, una característica habitual en datos ómicos. Las SVM permiten construir fronteras de decisión óptimas maximizando el margen entre clases y suelen mostrar un buen rendimiento incluso cuando el número de variables es elevado en relación con el número de muestras. La inclusión de este método proporciona un enfoque más robusto y moderno, ampliamente utilizado en bioinformática y aprendizaje automático aplicado a datos biológicos.
+
+En conjunto, la selección de estos tres métodos permite comparar el comportamiento de modelos paramétricos y no paramétricos, lineales y basados en distancias o márgenes, ofreciendo una visión más completa del problema de clasificación y reforzando la validez de los resultados obtenidos.
+
+### Carga los datos crudos a analizar
+
+El análisis se realizó utilizando únicamente las primeras 500 variables del conjunto de datos original. Esta decisión se tomó debido a que el uso de la base de datos completa provocaba problemas de desbordamiento de pila (stack overflow), asociados a la elevada dimensionalidad de los datos ómicos y a las limitaciones computacionales de los métodos de aprendizaje supervisado empleados.
+
+La reducción del número de variables permitió garantizar la estabilidad numérica del proceso de entrenamiento, así como la correcta ejecución de los algoritmos de clasificación, sin comprometer el objetivo principal del estudio. Este tipo de ajuste es habitual en el análisis de datos de alta dimensión y constituye una práctica razonable cuando se trabaja con conjuntos de datos biológicos de gran tamaño.
+
+```{r Cargar los datos}
+########################
+# 2. Cargar los datos  #
+########################
+
+#Carga de los datos crudos.
+Datos_crudos <- read.csv("data.csv") 
+
+#Selecionar solo las primeras 500 varibles de expresion génica
+Datos_crudos <- Datos_crudos[, 1:501]
+
+#Carga de las etiquetas del tipo de cáncer de cada paciente.
+Etiquetas_pacientes <- read.csv("labels.csv")
+
+```
+
+### Preprocesamiento de los datos
+
+En primer lugar, se realizó una inspección exploratoria de la estructura del conjunto de datos original mediante la función str(). Dado el elevado número de variables (genes testados), se visualizó únicamente la estructura de las primeras y últimas columnas del conjunto de datos crudos con el objetivo de verificar el formato de las variables sin generar una salida excesivamente extensa. En particular, la inspección de las últimas columnas permitió comprobar si el conjunto de datos incluía una columna de etiquetas de clasificación, ya que en muchos conjuntos de datos biológicos esta información suele encontrarse al final de la matriz de datos. En este caso, se confirmó que las etiquetas no estaban presentes en el archivo de datos original.
+
+Posteriormente, los datos de expresión génica fueron integrados con el archivo de etiquetas clínicas mediante una unión interna *inner_join* utilizando un identificador común de muestra (X). Esta integración es un paso imprescindible en aprendizaje supervisado, ya que los modelos requieren una única tabla que contenga simultáneamente las variables expresión génicas y la variable con las etiquetas de clasificación.
+
+Tras la unión, se volvió a inspeccionar la estructura de los datos para verificar que la columna de clasificación había sido correctamente añadida al conjunto de datos. A continuación, la variable de clase fue convertida explícitamente a un factor, dado que los métodos de clasificación empleados (LDA, k-NN y SVM) requieren que la variable respuesta sea de tipo categórico.
+
+Con el fin de facilitar el preprocesamiento posterior, se separaron explícitamente la variable de clase y el identificador de las muestras del conjunto de variables predictoras. El identificador de muestra se conservó para garantizar la trazabilidad y correcta interpretación de los resultados, aunque se excluyó del entrenamiento de los modelos al no aportar información predictiva. Del mismo modo, la variable de clasificación (clase) fue retirada temporalmente del conjunto de predictores para evitar interferencias en los pasos de filtrado.
+
+A continuación, se eliminaron aquellas variables (genes testados) cuyos valores eran todos iguales a cero en el conjunto de datos. Estas variables presentan varianza nula y no aportan información discriminativa, además de poder causar problemas numéricos en modelos basados en estimación de covarianzas, como el análisis discriminante lineal. La eliminación de estas variables constituye una práctica estándar en el análisis de datos ómicos y contribuye a mejorar la estabilidad y eficiencia de los modelos de aprendizaje supervisado.
+
+Finalmente, se reconstruyó el conjunto de datos definitivo combinando el identificador de las muestras, las variables predictoras filtradas y la variable de clasificación. Este conjunto de datos resultante constituye la base adecuada para la posterior división en conjuntos de entrenamiento y prueba y el entrenamiento de los modelos supervisados.
+
+
+```{r Preprocesamiento de los datos}
+##################################
+# 3. Procesamiento de los datos  #
+##################################
+
+#Visualizar y verificar los datos
+str(Datos_crudos, list.len = 11) #verificar la estructura del dataframe pero solo las primera 10 columnas (para que no quede demasiado largo en el documento final).
+str(Datos_crudos[, tail(seq_len(ncol(Datos_crudos)), 10)]) # verificar la estructura de las últimas 10 columnas de datos. Se pretende verificar si está la etiqueta de los datos (aún que en este caso sabemos que no) ya que la columna de etiquetas frecuentemente es la última de las bases de datos.
+
+# Unir datos y etiquetas ya que los modelos supervisionados necesitan una tabla única con los datos y sus etiquetas
+Datos_completos <- Datos_crudos %>%
+  inner_join(Etiquetas_pacientes, by = "X")
+
+#Visualizar y verificar los datos después de la unión.
+str(Datos_crudos[, tail(seq_len(ncol(Datos_crudos)), 10)]) # verificar la estructura de las últimas 10 columnas de datos. Se pretende verificar si se ha añadido la columna Class con las etiquetas de datos.
+
+# Convertir la variable de etiquetas de datos en factor
+Datos_completos$Class <- as.factor(Datos_completos$Class)
+
+# Separar etiquetas de datos y identificador de los genes testados
+Clase <- Datos_completos$Class #creamos una variable clase que contiene todas las etiquetas de clasificación de cada muestra
+ID <- Datos_completos$X #creamos una variable ID que contiene la identificación de todas las muestras.
+
+Datos_predictores <- Datos_completos %>%
+  dplyr::select(-Class, -X)  # eliminar clase e identificador para poder eliminar os genes testados en que todos os valores sao ceros.
+
+# Eliminar columnas (genes testados) con todos los valores a cero (varianza nula)
+Datos_predictores_filtrados <- Datos_predictores %>%
+  dplyr::select(where(~ sum(. != 0) > 0))
+
+# Reconstruir dataset final con las etiquetas de identificación de muestras y de clasificación de cada una de ellas.
+Datos_finales <- bind_cols(
+  X = ID,
+  Datos_predictores_filtrados,
+  Clase = Clase
+)
+```
+
+### División de la base de datos en datos de entrenamiento y datos de prueba
+
+El conjunto de datos se dividió en subconjuntos de entrenamiento (80 %) y prueba (20 %) mediante una partición estratificada basada en la variable de clase, preservando la proporción original de las distintas clases. Esta división permite entrenar los modelos con un subconjunto de los datos y evaluar posteriormente su capacidad de generalización en muestras no utilizadas durante el entrenamiento, evitando estimaciones optimistas del rendimiento.
+
+Tras la partición, se eliminaron las variables predictoras con varianza nula utilizando únicamente el conjunto de entrenamiento como referencia. Este paso es especialmente relevante en el análisis de datos biológicos de alta dimensión, donde algunas variables pueden quedar constantes en el subconjunto de entrenamiento. La eliminación de estas variables mejora la estabilidad numérica de los modelos, en particular del análisis discriminante lineal, y evita la introducción de ruido innecesario.
+
+El filtrado se aplicó posteriormente de forma idéntica al conjunto de prueba, garantizando la coherencia entre ambos conjuntos y evitando fugas de información (data leakage), lo que asegura una evaluación metodológicamente correcta de los modelos de aprendizaje supervisado.
+
+```{r Division de los datos}
+######################################
+# 4. División del conjunto de datos  #
+######################################
+
+# División del conjunto de datos en entrenamiento (80 %) y prueba (20 %). La partición se realiza de forma estratificada en función de la variable de clase, de tal manera que se conserva la proporción original de cada clase en ambos subconjuntos.
+trainIndex <- createDataPartition(Datos_finales$Clase, p = 0.8, list = FALSE)
+
+# Creación del subconjunto de entrenamiento que se utilizará para ajustar y entrenar los modelos de aprendizaje supervisado
+trainData <- Datos_finales[trainIndex, ]
+
+# Creación del subconjunto de prueba que contiene muestras no utilizadas durante el entrenamiento del modelo y se emplea para evaluar la capacidad de generalización de los modelos
+testData  <- Datos_finales[-trainIndex, ]
+
+## Eliminación de varianza cero basada solo en los datos de entrenamiento
+# Seleccionar solo las variables numéricas en los datos de entrenamiento
+train_pred <- trainData %>%
+  dplyr::select(-X, -Clase)
+
+# Calcular varianza por columna de las variables en los datos de entrenamiento
+var_train <- apply(train_pred, 2, var)
+
+# Seleccionar columnas con varianza mayor que cero en los datos de entrenamiento
+cols_validas <- names(var_train[var_train > 0])
+
+# Filtrar los datos de entrenamiento y los datos de prueba de modo a que se queden solo con las columnas con varianza mayor que cero en los datos de entrenamiento
+trainData <- trainData %>%
+  dplyr::select(X, all_of(cols_validas), Clase)
+
+testData <- testData %>%
+  dplyr::select(X, all_of(cols_validas), Clase)
+```
+
+### Normalización de los datos
+
+Previo al entrenamiento de los modelos de aprendizaje supervisado, se llevó a cabo una normalización de las variables predictoras mediante centrado y escalado. Este proceso consiste en restar la media y dividir por la desviación estándar de cada variable, con el objetivo de situarlas en una escala comparable y evitar que aquellas con mayor magnitud dominen el proceso de aprendizaje.
+
+La normalización se estimó exclusivamente a partir del conjunto de entrenamiento utilizando la función *preProcess()*, lo que permite calcular los parámetros de centrado y escalado sin utilizar información del conjunto de prueba. Posteriormente, estos mismos parámetros se aplicaron tanto a los datos de entrenamiento como a los de prueba mediante la función *predict()*. Este procedimiento evita la introducción de fugas de información (data leakage) y garantiza una evaluación objetiva del rendimiento de los modelos.
+
+El centrado y escalado de los datos es especialmente relevante para métodos basados en distancias o márgenes, como k-NN y SVM, y contribuye también a la estabilidad numérica de modelos como el análisis discriminante lineal. En conjunto, este paso mejora la comparabilidad entre variables y favorece un entrenamiento más robusto y reproducible de los modelos.
+
+```{r Normalización de los datos}
+##################################
+# 5. Normalización de los datos  #
+##################################
+
+# Calcular los parámetros de normalización (media y desviación estándar) utilizando únicamente las variables predictoras del conjunto de entrenamiento
+preproc <- preProcess(
+  trainData[, -ncol(trainData)],  # se excluye la variable de clase del escalado (que es la última columna)
+  method = c("center", "scale")   # centrar (media 0) y escalar (desviación estándar 1)
+)
+
+# Aplicar la normalización al conjunto de entrenamiento utilizando los parámetros calculados previamente
+trainDataScaled <- predict(preproc, trainData)
+
+# Aplicar la misma normalización al conjunto de prueba, garantizando que no se utiliza información del test para el preprocesamiento
+testDataScaled  <- predict(preproc, testData)
+
+```
+
+### Entranamiento y evaluación de los modelos seleccionados
+
+```{r entrenamiento y evaluación de los modelos}
+####################################################
+# 6. Entrenamiento y evaluación                    #
+####################################################
+
+# Crea un nuevo dataframe eliminando la columna identificadora X, dejando únicamente las variables predictoras y la variable de clase, que son las que necesitan los modelos.
+train_Dataset_Final <- trainDataScaled[, !colnames(trainDataScaled) %in% "X"]
+test_Dataset_Final<- testDataScaled[, !colnames(trainDataScaled) %in% "X"]
+
+####################################################
+# 6.1. Modelo Análisis Discriminante Lineal (LDA)  #
+####################################################
+
+# Entrenar el modelo de Análisis Discriminante Lineal (LDA)
+modelo_lda <- train(
+  Clase ~ .,
+  data = train_Dataset_Final,
+  method = "lda",
+  trControl = trainControl(method = "none")
+)
+
+# Predicción sobre el conjunto de prueba
+pred_lda <- predict(
+  modelo_lda,
+  test_Dataset_Final
+)
+
+# Evaluación del modelo LDA mediante matriz de confusión
+confusion_lda <- confusionMatrix(
+  pred_lda,
+  test_Dataset_Final$Clase
+)
+
+# Mostrar matriz de confusión
+print(confusion_lda)
+
+# Extraer la tasa de acierto (accuracy)
+accuracy_lda <- confusion_lda$overall["Accuracy"]
+
+##############################################
+# 6.2. Modelo k vecinos más cercanos (k-NN)  #
+##############################################
+
+# Entrenar el modelo k-NN utilizando validación cruzada de 10 folds
+# para seleccionar el número óptimo de vecinos (k)
+modelo_knn <- train(
+  Clase ~ .,
+  data = train_Dataset_Final,
+  method = "knn",
+  trControl = trainControl(method = "cv", number = 10),
+  tuneLength = 10
+)
+
+# Realizar predicciones sobre el conjunto de prueba
+pred_knn <- predict(
+  modelo_knn,
+  test_Dataset_Final
+)
+
+# Evaluar el modelo k-NN mediante matriz de confusión
+confusion_knn <- confusionMatrix(
+  pred_knn,
+  test_Dataset_Final$Clase
+)
+
+# Mostrar resultados del modelo k-NN
+print(confusion_knn)
+
+# Extraer la tasa de acierto (accuracy) del modelo k-NN
+accuracy_knn <- confusion_knn$overall["Accuracy"]
+
+
+######################################################
+# 6.3. Modelo Máquinas de Vectores de Soporte (SVM)  #
+######################################################
+
+# Entrenar el modelo SVM con kernel lineal utilizando validación cruzada
+modelo_svm <- train(
+  Clase ~ .,
+  data = train_Dataset_Final,
+  method = "svmLinear",
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+# Realizar predicciones sobre el conjunto de prueba
+pred_svm <- predict(
+  modelo_svm,
+  test_Dataset_Final
+)
+
+# Evaluar el modelo SVM mediante matriz de confusión
+confusion_svm <- confusionMatrix(
+  pred_svm,
+  test_Dataset_Final$Clase
+)
+
+# Mostrar resultados del modelo SVM
+print(confusion_svm)
+
+# Extraer la tasa de acierto (accuracy) del modelo SVM
+accuracy_svm <- confusion_svm$overall["Accuracy"]
+```
+
+```{r comparación de los modelos}
+##################################################
+# 7. Comparación del rendimiento de los modelos  #
+##################################################
+
+# Crear un data frame con la tasa de acierto de cada modelo
+resultados <- data.frame(
+  Modelo   = c("LDA", "k-NN", "SVM"),
+  Accuracy = c(
+    as.numeric(accuracy_lda),
+    as.numeric(accuracy_knn),
+    as.numeric(accuracy_svm)
+  )
+)
+
+# Mostrar los resultados comparativos
+print(resultados)
+
+```
+
+Los tres modelos de aprendizaje supervisado evaluados muestran tasas de acierto muy elevadas, cercanas al 100%, lo que indica una alta capacidad de discriminación entre las clases consideradas.
+
+En concreto, los modelos LDA y SVM alcanzan una tasa de acierto idéntica (0.9937), siendo los métodos con mejor rendimiento global en este análisis. Este resultado sugiere que, una vez aplicado el preprocesamiento adecuado (filtrado de variables, eliminación de varianza nula y normalización), los datos presentan una estructura que puede ser separada de forma muy eficaz mediante fronteras de decisión lineales. En el caso de LDA, esto indica que las combinaciones lineales de las variables capturan correctamente las diferencias entre clases, mientras que en SVM la maximización del margen permite una separación igualmente eficiente.
+
+Por su parte, el modelo k-NN obtiene una accuracy ligeramente inferior (0.9874), aunque sigue mostrando un rendimiento muy elevado. Esta pequeña diferencia puede atribuirse a la naturaleza local y basada en distancias del algoritmo, que puede verse más afectada por el ruido residual o por la alta dimensionalidad del espacio de características, incluso tras la normalización de los datos.
+
+La similitud en el rendimiento de los tres modelos sugiere que el problema de clasificación está bien planteado y que las clases presentan patrones claramente diferenciables en el espacio de variables analizado. Además, la concordancia entre métodos de naturaleza distinta refuerza la robustez de los resultados obtenidos y aumenta la confianza en las conclusiones del estudio.
