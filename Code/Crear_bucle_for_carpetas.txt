@@ -1,0 +1,7 @@
+# Crear un bucle for para crear 1 capeta por tema en las signatura de segundo trimestr del master de Bioinformática
+
+# Para la signatura de Bases de datos
+for i in {1..10}; do mkdir Tema$i; done
+
+# Para la signatura de Introduccíon a Python
+for i in {1..15}; do mkdir Tema$i; done
