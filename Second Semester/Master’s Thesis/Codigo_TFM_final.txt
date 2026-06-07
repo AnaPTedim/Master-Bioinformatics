@@ -1,0 +1,620 @@
+# Workflow Bioinformático: Análisis de Genomas de Enterococcus (TFM)
+
+## Este documento contiene la secuencia lógica de comandos y scripts utilizados para el análisis de aislados de Enterococcus faecium, E. faecalis y E. lactis.
+
+# FASE 1: Preparación del Entorno y Herramientas
+
+# 1. Instalación de programas necesarios
+
+## Instalar FastQC usando miniconda - control de calidad de las secuencias crudas (FASTQ)
+conda install -c bioconda -c conda-forge fastqc
+
+## Instalar MultiQC usando miniconda - integración de resultados de control de calidad
+conda install -c bioconda -c conda-forge multiqc
+
+## Instalar fastp usando miniconda - filtrado y preprocesamiento de lecturas Illumina
+conda install -c bioconda -c conda-forge fastp
+
+## Instalar NanoFilt usando miniconda - filtrado de lecturas largas de Nanopore
+conda install -c bioconda -c conda-forge nanofilt
+
+## Instalar bwa usando miniconda - mapeo de secuencias contra genoma de referencia
+conda install -c bioconda -c conda-forge bwa
+
+## Instalar samtools usando miniconda - manipulación de archivos SAM/BAM
+conda install -c bioconda -c conda-forge samtools=1.19
+
+## Instalar Unicycler usando miniconda - ensamblaje de genomas bacterianos
+conda install -c bioconda -c conda-forge unicycler
+
+## Instalar Python 3.10 (requerido por algunas dependencias)
+conda install -c conda-forge python=3.10
+
+## Instalar htslib usando miniconda - dependencia para herramientas de mapeo
+conda install -c bioconda -c conda-forge htslib
+
+## Instalar openjdk usando miniconda - dependencia para herramientas basadas en Java
+conda install -c conda-forge openjdk=17
+
+## Instalar Bandage usando miniconda - visualización de grafos de ensamblaje
+conda install -c bioconda -c conda-forge bandage
+
+## Instalar QUAST usando miniconda - evaluación de la calidad del ensamblaje
+conda install -c bioconda -c conda-forge quast
+
+## Instalar bakta usando miniconda - anotación de genomas bacterianos
+conda install -c bioconda -c conda-forge bakta
+
+## Instalar Qualimap usando miniconda - control de calidad de mapeos
+conda install -c bioconda -c conda-forge qualimap
+
+## Instalar Kraken2 - clasificación taxonómica
+conda install -c bioconda kraken2
+
+## Instalar KrakenTools - procesamiento de resultados de Kraken2
+conda install -c bioconda krakentools
+
+## Instalar Bracken - estimación de abundancias taxonómicas
+conda install -c bioconda bracken
+
+## Instalar ncbi-genome-download - descarga de genomas desde NCBI
+conda install -c bioconda ncbi-genome-download
+
+## Instalar MLST - tipado multilocus
+conda install -c bioconda mlst
+
+## Instalar ResFinder - detección de genes de resistencia antimicrobiana
+conda install -c bioconda resfinder
+
+## Instalar VirulenceFinder - detección de genes de virulencia
+conda install -c bioconda virulencefinder
+
+## Instalar PlasmidFinder - detección de replicones plasmídicos
+conda install -c bioconda plasmidfinder
+
+## Instalar Abricate - búsqueda de genes usando bases de datos personalizadas
+conda install -c bioconda -c conda-forge abricate
+
+## Instalar pandas - manipulación y análisis de datos
+conda install -c conda-forge pandas
+
+## Instalar minimap2 - alineamiento de secuencias largas
+conda install -c bioconda -c conda-forge minimap2
+
+## Instalar bcftools - análisis de variantes genéticas (VCF/BCF)
+conda install -c bioconda -c conda-forge bcftools
+
+## Instalar fastANI - cálculo rápido de la identidad nucleotídica promedio (ANI) entre genomas
+conda install -c bioconda -c conda-forge fastani
+
+## Instalar pyANI - análisis detallado de ANI y generación de matrices y heatmaps comparativos
+conda install -c bioconda -c conda-forge pyani
+
+## Instalar Gubbins - detección y eliminación de regiones de recombinación en alineamientos del core genome bacteriano
+conda install -c bioconda -c conda-forge gubbins
+
+## Instalar snp-dists - cálculo de matrices de distancias basadas en SNPs a partir de alineamientos
+conda install -c bioconda -c conda-forge snp-dists
+
+## Instalar Panaroo - análisis de pangenoma bacteriano y generación de matrices de genes core y accesorio
+conda install -c bioconda -c conda-forge panaroo
+
+## 1.1. Crear y activar del ambiente principal de conda
+
+conda create -n analisis_sec -c bioconda -c conda-forge \
+    fastqc fastp multiqc bwa samtools=1.19 unicycler htslib openjdk=17 \
+    bandage quast qualimap python=3.10 kraken2 ncbi-genome-download \
+    bracken krakentools mlst resfinder virulencefinder plasmidfinder 
+
+conda activate analisis_sec
+
+
+## 1.2. Configurar de Bases de Datos (CGE Tools)
+
+# ResFinder
+mkdir resfinder_db
+git clone https://bitbucket.org/genomicepidemiology/resfinder_db/
+cd resfinder_db
+python3 INSTALL.py
+
+# PointFinder
+mkdir pointfinder_db
+git clone https://bitbucket.org/genomicepidemiology/pointfinder_db/
+cd pointfinder_db
+python3 INSTALL.py
+
+# VirulenceFinder
+mkdir virulencefinder_db
+git clone https://bitbucket.org/genomicepidemiology/virulencefinder_db/
+cd virulencefinder_db
+python3 INSTALL.py
+
+# PlasmidFinder
+mkdir plasmidfinder_db
+git clone https://bitbucket.org/genomicepidemiology/plasmidfinder_db/
+cd plasmidfinder_db
+python3 INSTALL.py
+
+
+# FASE 2: Control de Calidad y Trimming
+
+## Procesamiento de lecturas crudas (Illumina y Nanopore).
+
+## 2.1. Crear los directorios que necesarios para hacer el analisis de qualidad y trimming de las secuencias
+mkdir -p quality/raw quality/filtered trimmed
+
+## 2.2. Generación de la lista de Muestras
+fastqc *fastq.gz -o quality/raw/
+ls *fastq.gz | cut -d _ -f 2 | sort -u > muestras.txt # (solo muestras de illumina - se hizo en dos tiempos diferentes)
+ls *fastq.gz | cut -d _ -f 2 | sort -u > muestras_2.txt # (solo muestras de nanopore - se hizo en dos tiempos diferentes)
+
+## 2.3. Análisis de la calidad inicial
+
+### 2.3.1. Análisis de fastqc para las reads
+fastqc --memory 8192 *fastq.gz -o quality/raw/
+
+### 2.3.2. Integración de los resultados de calidad
+multiqc .
+
+## 2.4. Trimming (fastp para Illumina, NanoFilt para Nanopore)
+
+### 2.4.1. Illumina
+for i in $(cat muestras.txt); do 
+    fastp --in1 *$i*_1* --in2 *$i*_2* \
+          --out1 trimmed/${i}_R1_filtered.fastq.gz --out2 trimmed/${i}_R2_filtered.fastq.gz \
+          --detect_adapter_for_pe --cut_front --cut_tail --cut_mean_quality 30 \
+          --json trimmed/$i.json --html trimmed/$i.html
+done
+
+### 2.4.2. Nanopore
+for i in $(cat muestras_2.txt); do 
+    gunzip -c ${i}.fastq.gz | NanoFilt -q 10 -l 500 | gzip > trimmed/${i}_filtered.fastq.gz
+done
+
+### 2.5. Análisis de la calidad después del trimming
+fastqc --memory 8192 trimmed/*fastq.gz -o quality/filtered
+
+## 2.6. Integración de los resultados de calidad
+multiqc .
+
+
+# FASE 3: Ensamblaje y Anotación
+
+# Generación de genomas de referencia y anotación funcional.
+
+## 3.1. Crear directorio para los resultados del emsamblado y de calidad
+mkdir -p assembly/quality
+
+## 3.2. Ensamblaje con Unicycler 
+
+### 3.2.1. Ensamblaje para las muestras de illumina
+for i in $(cat muestras.txt); do
+    unicycler -1 trimmed/${i}*R1* -2 trimmed/${i}*R2* -o assembly/${i} -t 8
+done
+
+### 3.2.2. Ensamblaje para las muestras de nanopore
+for i in $(cat muestras_2.txt); do
+    unicycler -l trimmed/${i}*fastq.gz  -o assembly/${i} -t 8
+done
+
+## 3.3. Calidad del ensamblaje (QUAST) y Renombrado
+
+### 3.3.1. Calidad de emsamblaje
+for i in $(cat muestras.txt); do 
+    quast assembly/${i}/assembly.fasta -o assembly/quality/${i}
+done
+
+#### 3.3.1.1. Compilar los resultados del análisis de calidad
+python3 compilar_quast_results.py
+
+### 3.3.2. Organizar genomas en una carpeta única
+mkdir -p genomes
+./change_fasta_file_names.sh
+
+# FASE 4: Taxonomía e Identidad
+
+##Confirmación de especie mediante k-meros y genes marcadores.
+
+## 4.1. Clasificación con Kraken2
+### 4.1.1. Crear directorio para los resultados del analisis de kraken2
+mkdir enterococcus_db
+
+### 4.1.2. Descargar el arbol taxonomico de NCBI
+kraken2-build --download-taxonomy --db enterococcus_db --use-ftp
+
+### 4.1.3. extaer los genomas de referencia de enterecoccus de la base de datos del ncbi
+ncbi-genome-download bacteria --genera Enterococcus --formats fasta --refseq-categories reference --output-folder genomes
+
+## 4.1.4. Determinar cuantos genomas de referencias se han extraido del NCBI
+find genomes/refseq/bacteria/*/ -name "*.fna.gz" | wc -l
+
+## 4.1.5. Descomprimir los ficheros de los genomas
+find genomes/refseq/bacteria/*/ -name "*.fna.gz" -exec gunzip {} \;
+
+## 4.1.6. Añadir los genomas a la base de datos kraken2
+find genomes -name "*.fna" -exec kraken2-build --add-to-library {} --db enterococcus_db \;
+
+## 4.1.7. Construir la base de datos
+kraken2-build --build --db enterococcus_db --threads 8
+
+## 4.1.8. Usar kraken2 para la determinación taxonomica
+for i in $(cat muestras.txt); do 
+    kraken2 --db /Users/anasofia/Master_UNIR/Segundo_trimestre/TFM/Genomas/enterococcus_db --threads 8 --report assembly/kraken/${i}.report --output assembly/kraken/${i}.output assembly/${i}/assembly.fasta; 
+done
+
+## 4.1.9. Usar un script para compilar los resultados de kraken2 (la com mayor % de id)
+./compilar_results_kraken.sh
+
+## 4.2. Deactivar el entorno analysis_sec 
+conda deactivate
+
+## 4.3. Confirmación de Especie (Gen gluP con Abricate)
+### 4.3.1 Crear y activar un ambiente especifico para abricate (incompatibilidades con varias herramientas del ambiente analysis_sec)
+conda create -n abricate_analisis -c bioconda -c conda-forge abricante pandas
+conda activate abricate_analisis
+
+### 4.3.2. Localizar dónde se instaló Abricate (localizar la carpeta de bases de datos de abricate en del ambiente conda)
+echo $CONDA_PREFIX/db
+
+### 4.3.3. Crear la carpeta para la base de datos de gluP
+mkdir -p $CONDA_PREFIX/db/ent_gluP_id
+
+### 4.3.4. Añadir secuencias a la carpeta de la base de datos de gluP
+####El archivo debe llamarse obligatoriamente sequences
+cp /Users/anasofia/Master_UNIR/Segundo_trimestre/TFM/Genomas/reads/ent_id_db/gluP.txt $CONDA_PREFIX/db/ent_gluP_id/sequences.fasta
+
+### 4.3.5. Indexar la nueva base de datos a abricate
+abricate --setupdb
+
+### 4.3.6. Usar abricate para buscar los genes gluP (carpeta de los genomas)
+for i in $(cat muestras_efm.txt); do 
+    abricate --db ent_gluP_id "${i}.fasta" >> results_gluP.txt
+done
+
+### 4.3.7. Copiar los resultados a la capeta del assembly
+cp results_gluP.txt /Users/anasofia/Master_UNIR/Segundo_trimestre/TFM/Genomas/reads/assembly 
+
+### 4.3.8. Compilar los resultados de la detección de gluP con abricate
+python compilar_gluP_abricate.py
+
+### 4.3.9. Desactivar el ambiente conda
+conda deactivate
+
+
+# FASE 5: Caracterización Genotípica
+
+## MSLT, Resistencia, Virulencia, Plásmidos y Bacteriocinas.
+
+## 5.1. Activar el ambiente analisis_sec
+conda activate analysis_sec
+
+## 5.3. Análisis de MLST
+
+### 5.3.1. Crear una carpeta para guardar los resultados del MLST
+mkdir MLST
+
+### 5.3.2. Realizar el tipado por MLST 
+mlst *.fasta > MLST/mlst_results.txt 
+
+
+## 5.4. Análisis con Resfinder - analisis de resistencia a los antibióticos 
+### 5.4.1. Correr script para analisar todos los genomas automaticamente
+./resfinder_genomes.sh
+
+### 5.4.2. Compilar los resultados obtenidos con Resfinder y Pointfinder
+python compilar_resfinder.py
+python compilar_pointfinder.py
+
+
+## 5.5. Análisis con Virulencefinder - analisis de virulencia 
+### 5.5.1. Correr script para analisar todos los genomas automaticamente
+./virulence_genomes.sh
+
+### 5.5.2. Compilar los resultados obtenidos con Resfinder y Pointfinder
+python3 compilar_virulencefinder.py
+
+## 5.6. Análisis con Plasmidfinder - analisis de proteinas iniciadoras de replicación de plásmidos 
+### 5.6.1. Correr script para analisar todos los genomas automaticamente
+./plasmid_rep_genomes.sh
+
+### 5.6.2. Compilar los resultados obtenidos con Resfinder y Pointfinder
+python compilar_plasmidfinder.py
+
+## 5.7. Desactivar el ambiente conda
+conda deactivate
+
+## 5.8. Análisis de genes de bacteriocinas usando abricate
+### 5.8.1. Activar el ambiente de conda que contiene abricate
+conda activate abricate_analsis
+
+### 5.8.2. Localizar dónde se instaló Abricate (localizar la carpeta de bases de datos de abricate en del ambiente conda)
+echo $CONDA_PREFIX/db
+
+### 5.8.3 Crear la carpeta para la base de datos de bacteriocinas
+mkdir -p $CONDA_PREFIX/db/bacteriocinas
+
+### 5.8.4. Añadir secuencias a la carpeta de la base de datos de bacteriocinas (el archivo debe llamarse obligatoriamente sequences)
+cp /Users/anasofia/Master_UNIR/Segundo_trimestre/TFM/Genomas/reads/bacteriocin_db/bacteriocin_db.fasta $CONDA_PREFIX/db/bacteriocinas/sequences
+
+### 5.8.5. Indexar la nueva base de datos a abricate
+abricate --setupdb
+
+### 5.8.6. Crear el archivo muestras3.txt que tiene el nombre de todos los genomas (dentro de la carpeta genomas)
+ls *fasta | cut -d . -f 1 | sort -u > muestras3.txt
+
+### 5.8.7. Usar abricate para buscar las bacteriocinas (carpeta de los genomas)
+for i in $(cat muestras3.txt); do abricate --db bacteriocinas "${i}.fasta" >> results_bac.txt; done
+
+### 5.8.8. Copiar los resultados a la capeta del assembly
+cp results_bac.txt /Users/anasofia/Master_UNIR/Segundo_trimestre/TFM/Genomas/reads/assembly 
+
+### 5.8.9. Compilar los resultados de la busqueda de bacteriocinas con abricate
+python compilar_bac_abricate.py
+
+### 5.8.10. Desactivar el ambiente conda
+conda deactivate
+
+## 5.9. notación con Bakta
+### 5.9.1. Crear y activar ambiente especifico para bakta
+conda create -n bakta_env -c conda-forge -c bioconda bakta
+conda activate bakta_env
+
+#### 5.9.2. Crear directorio para los resultados de la anotación
+mkdir -p genomes/annotation_bakta
+
+#### 5.9.3. Instalar a¡la bd de bakta y añadirla to path
+bakta_db download --type full --output bakta_db_path
+export BAKTA_DB=/Users/anasofia/Master_UNIR/Segundo_trimestre/TFM/Genomas/reads/assembly/bakta_db_path/db
+echo $BAKTA_DB
+
+### 5.9.3. Anotación con Bakta
+bakta --db $BAKTA_DB --output genomes/annotation_bakta/HPH128 --prefix HPH128 --locus-tag HPH128 --threads 8 --complete --gram + genomes/HPH128.fasta
+
+#### 5.9.4. realizar la anotación 
+for i in genomes/*.fasta; do
+    name=$(basename "$i" .fasta)
+    bakta --db $BAKTA_DB \
+          --output genomes/annotation_bakta/${name} \
+          --prefix "${name}" \
+          --locus-tag "${name}" \
+          --threads 8 \
+          --complete \
+          --gram + \
+          "$i";
+done
+
+### 5.9.5. Pasa los fichero anotados .gbk a una misma carpeta
+mkdir -p genomes/annotations_gff3
+for i in $(cat muestras3.txt); do
+cp /Users/anasofia/Master_UNIR/Segundo_trimestre/TFM/Genomas/reads/assembly/genomes/annotation_bakta/${i}/${i}.gff3 genomes/annotations_gff3/${i}.gff3;
+done
+
+## 5.9.6. Deactivar el ambiente conda
+conda deactivate
+
+
+
+# FASE 6: Genómica Comparativa
+
+## Mapeo de variantes y distancias genómicas.
+
+## 6.1. Crear un ambiente de conda proprio para evitar incompatibilidades
+conda create -n genome_mapping -c bioconda -c conda-forge minimap2 bcftools fastani pyani
+
+## 6.2. Activar el ambiente conda
+conda activate genome_mapping
+
+
+## 6.3. Mapeo Automático (Minimap2/Samtools)
+ 
+### 6.3.1. Crear un archivo en que los pares estan separados por un espacio (creado a mano)
+#### parejas.txt
+
+### 6.3.2. Hacer el analisis con minimap2 para procesar múltiples parejas de variantes
+./minimap2_bucle.sh
+
+### 6.3.3. Crear un informe de SNPs para el TFM
+python compilar_minimap2.py
+
+### 6.3.4. Obtener los contigs no alinados 
+./strain_diferences.sh
+
+
+## 6.4. Búsqueda de Variantes (SNPs) con BCFtools 
+
+### 6.4.1. Hacer el analisis con minimap2 para procesar múltiples parejas de variantes (usar el archivo parejas.txt creado anteriormente)
+./bcftools_bucle.sh
+
+### 6.4.2. Crear un informe de SNPs 
+./bcftools_informe.sh
+
+## 6.5. Identidad Promedio de Nucleótidos (fastANI)
+
+### 6.5.1. Alineamento por parejas (usar el fichero parejas.txt creado anteriormente)
+./fastANI_bucle.sh
+
+### 6.5.2. Crear un archvio de texto con todos los resultados de fastANI
+./fastANI_informe.sh
+
+
+## 6.6. Deactivar el ambiente conda
+conda deactivate
+
+
+## 6.7. Análisis de Pangenoma con Panaroo
+### 6.7.1. Crear y activar ambiente para Panaroo
+conda create -n panaroo_env -c bioconda -c conda-forge python=3.10 panaroo
+conda activate panaroo_env
+
+### 6.7.2. Verificar la version de biopython (panaroo solo funciona con biopython<1.83) y instalar una version compatible
+python -c "import Bio; print(Bio.__version__)"
+pip install biopython==1.81
+
+### 6.7.3. Análisis para Efm
+#### 6.7.3.1. Preparación de archivos GFF 
+mkdir -p genomes/panaroo_input/Efm 
+mkdir -p genomes/panaroo_results/Efm
+
+for i in $(cat muestras_efm_noref.txt); do 
+    cp /Users/anasofia/Master_UNIR/Segundo_trimestre/TFM/Genomas/reads/assembly/genomes/annotation_bakta/${i}/${i}.gff3 genomes/panaroo_input/Efm/${i}.gff3;
+done
+
+#### 6.7.3.2. Correr Panaroo 
+panaroo -i genomes/panaroo_input/Efm/*.gff3 \
+        -o genomes/panaroo_results/Efm \
+        --clean-mode moderate \
+        --remove-invalid-genes \
+        -a core \
+        --aligner mafft \
+        --core_threshold 0.95 \
+        -t 1
+
+### 6.7.3. Análisis para Efc
+#### 6.7.3.1. Preparación de archivos GFF 
+mkdir -p genomes/panaroo_input/Efc 
+mkdir -p genomes/panaroo_results/Efc
+
+for i in $(cat muestras_efc_noref.txt); do 
+    cp /Users/anasofia/Master_UNIR/Segundo_trimestre/TFM/Genomas/reads/assembly/genomes/annotation_bakta/${i}/${i}.gff3 genomes/panaroo_input/Efc/${i}.gff3;
+done
+
+#### 6.7.3.2. Correr Panaroo 
+panaroo -i genomes/panaroo_input/Efc/*.gff3 \
+        -o genomes/panaroo_results/Efc \
+        --clean-mode moderate \
+        --remove-invalid-genes \
+        -a core \
+        --aligner mafft \
+        --core_threshold 0.95 \
+        -t 1
+
+### 6.7.4. Análisis para Ela
+#### 6.7.4.1. Preparación de archivos GFF 
+mkdir -p genomes/panaroo_input/Ela 
+mkdir -p genomes/panaroo_results/Ela
+
+for i in $(cat muestras_ela_noref.txt); do 
+    cp /Users/anasofia/Master_UNIR/Segundo_trimestre/TFM/Genomas/reads/assembly/genomes/annotation_bakta/${i}/${i}.gff3 genomes/panaroo_input/Ela/${i}.gff3;
+done
+
+#### 6.7.4.2. Correr Panaroo 
+panaroo -i genomes/panaroo_input/Ela/*.gff3 \
+        -o genomes/panaroo_results/Ela \
+        --clean-mode moderate \
+        --remove-invalid-genes \
+        -a core \
+        --aligner mafft \
+        --core_threshold 0.95 \
+        -t 1
+
+
+
+# FASE 7: Análisis Filogenético
+
+## Estudio de SNPs del core genome y reconstrucción de árboles.
+
+## 7.1. Crear y activar un ambiente conda para analisis filogenético
+conda creacte -n phylogeny -c bioconda -c conda-forge snippy iqtree ncbi-genome-download pandas gubbins
+conda activate phylogeny
+
+## 7.2. Hacer el download de los genomes de referencia (carpena genomas)
+
+### 7.2.1. Efc GCF_000393015.1
+ncbi-genome-download -s refseq -F fasta -g enterococcus -A GCF_000393015.1 bacteria -o Efc_T5 && \
+find Efc_T5  -name "*.fna.gz" -exec mv {} . \; && \
+gunzip GCF_000393015.1_*.fna.gz && \
+mv GCF_000393015.1_*.fna Efc_T5.fasta && \
+rm -r Efc_T5
+
+### 7.2.2. Efm GCF_000174395.2
+ncbi-genome-download -s refseq -F fasta -g enterococcus -A GCF_000174395.2 bacteria -o Efm_DO && \
+find Efm_DO  -name "*.fna.gz" -exec mv {} . \; && \
+gunzip GCF_000174395.2_*.fna.gz && \
+mv GCF_000174395.2_*.fna Efm_DO.fasta && \
+rm -r Efm_DO
+
+ncbi-genome-download -s refseq -F gff -g "Enterococcus faecium" -A GCF_000174395.2 bacteria -o Efm_DO && \
+find Efm_DO -name "*.gff.gz" -exec mv {} . \; && \
+gunzip GCF_000174395.2_*.gff.gz && \
+mv GCF_000174395.2_*.gff Efm_DO.gff && \
+rm -r Efm_DO
+
+### 7.2.3. Ela GCF_006337145.1
+ncbi-genome-download -s refseq -F fasta -g enterococcus -A GCF_006337145.1 bacteria -o Ela_HB-1 && \
+find Ela_HB-1 -name "*.fna.gz" -exec mv {} . \; && \
+gunzip GCF_006337145.1_*.fna.gz && \
+mv GCF_006337145.1_*.fna Ela_HB-1.fasta && \
+rm -r Ela_HB-1
+
+## 7.3. Alineamiento del Core (Snippy)
+
+## 7.3.1. Crear fichero .txt con el nombre de las muestras de Efm, Ela y Efc incluyendo la referencia
+muestras_efm.txt (no incluye los dos E. lactis)
+muestras_ela.txt
+muestras_efc.txt
+
+### 7.3.2. Ejecutar Snippy por muestra
+./snippy_efc.sh
+./snippy_efm.sh
+./snippy_ela.sh
+
+### 7.3.4. Generar Core Alignment
+snippy-core --prefix filogenia_snippy/efm/core_efm filogenia_snippy/efm/* --ref referencias/Efm_DO.fasta
+
+snippy-core --prefix filogenia_snippy/efc/core_efc filogenia_snippy/efc/* --ref referencias/Efc_T5.fasta
+
+snippy-core --prefix filogenia_snippy/ela/core_ela filogenia_snippy/ela/* --ref referencias/Ela_HB-1.fasta
+
+### 7.3.5. Deactivar el ambiente conda
+conda deactivate
+
+## 7.4. Eliminar regiones de elevada recombinación (Gubbins)
+
+### 7.4.1. Crear y activar un ambiente especifico para Gubbins (incompatibilidad de con ambiente phylogeny por python=3.12)
+conda create -n gubbins_env python=3.10 gubbins -c bioconda -c conda-forge
+conda activate gubbins_env
+
+### 7.4.2. Crear la carpeta para resultados de gubbins
+mkdir -p results_gubbins/efm results_gubbins/efc results_gubbins/ela
+
+### 7.4.3. Usar gubbins para cada una de las especies
+run_gubbins.py --prefix results_gubbins/efm/gubbins_results_efm --threads 4 filogenia_snippy/efm/core_efm.full.aln
+run_gubbins.py --prefix results_gubbins/efc/gubbins_results_efc --threads 4 filogenia_snippy/efc/core_efc.full.aln
+run_gubbins.py --prefix results_gubbins/ela/gubbins_results_ela --threads 4 filogenia_snippy/ela/core_ela.full.aln # (No se puede construir el arbol. Son demasiado diferentes)
+
+### 7.4.4. Deactivar el ambiente conda
+conda deactivate
+
+## 7.5. Obtener de la matriz de distancias
+### 7.5.1. Activar el ambiente phylogeny
+conda activate phylogeny
+
+### 7.5.2. Obtener la matriz de distancias por especie
+snp-dists results_gubbins/efm/gubbins_results_efm.filtered_polymorphic*.fasta > matriz_distancias_snps_efm.txt
+cp matriz_distancias_snps_efm.txt /Users/anasofia/Master_UNIR/Segundo_trimestre/TFM/Resultados
+
+snp-dists results_gubbins/efc/gubbins_results_efc.filtered_polymorphic*.fasta > matriz_distancias_snps_efc.txt
+cp matriz_distancias_snps_efc.txt /Users/anasofia/Master_UNIR/Segundo_trimestre/TFM/Resultados
+
+
+## 7.6. Reconstrucción del Árbol (IQ-TREE)
+
+### 7.6.1. Calculando el árbol con modelo GTR+G+ASC 
+mkdir -p arboles_iqtree
+
+### 7.6.2. Ejecutar IQ-TREE 
+iqtree -s results_gubbins/efm/gubbins_results_efm.filtered_polymorphic*.fasta \
+       -st DNA \
+       -m GTR+G+ASC \
+       -bb 1000 \
+       -nt AUTO \
+       -pre arboles_iqtree/arbol_efm
+
+iqtree -s results_gubbins/efc/gubbins_results_efc.filtered_polymorphic_sites.fasta \
+       -st DNA \
+       -m GTR+G+ASC \
+       -bb 1000 \
+       -nt AUTO \
+       -pre arboles_iqtree/arbol_efc
+
+### 7.6.3. iTOL - se usó iTOL para visualización de los arboles filogenéticos
