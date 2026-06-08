@@ -29,3 +29,10 @@ A collection of Python scripts utilising *Pandas* and regex patterns to read raw
 * Extraction of SNP counts from alignment cores (`compilar_SNPs_snippy.py`).
 * Abricate data aggregation for custom markers (`compilar_bac_abricate.py`, `compilar_gluP_abricate.py`).
 * Before clustering analyses, draft assemblies are subjected to structural header standardisations to inject the specific isolate identifier across every single sequence: (`utils_parsing/cambio_nombres_contigs.py`)
+
+### 4. `r_analytics/` (Statistical Analysis & Publication-Quality Graphics in R)
+A structured script in R (`Codigo_R_TFM_final.R`) dedicated to final data mining, epidemiological matrix integration, and the generation of scientific-grade figures utilising the *Tidyverse* ecosystem:
+* Conversion of data matrices into long format via `tidyr` to compute antimicrobial susceptibility percentages and generate stacked bar plots (`ggplot2`).
+* Comparative analysis of N50 and contig counts using log-scaled scatter plots and cross-referenced boxplots segmented by sequencing technology (Illumina vs. Nanopore).
+* Stacked bar charts displaying Panaroo pangenome components (Core, Soft core, Shell, Cloud), alongside `ggVennDiagram` integration for cross-strain gene intersection mapping.
+* Construction of high-resolution interactive heatmaps using `ComplexHeatmap` and `circlize`, matching lateral taxonomic metadata (Species and Homan/Bezdicek Sequence Types) with filtered gene presence/absence clusters.
